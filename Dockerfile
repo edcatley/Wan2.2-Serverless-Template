@@ -41,9 +41,8 @@ COPY src/extra_model_paths.yaml ./
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt
 
-# (Add your node install script here or run commands directly)
-# COPY scripts/comfy-node-install.sh ... etc ...
-RUN comfy-node-install comfyui-videohelpersuite comfyui-kjnodes ...
+# CUSTOM NODE INSTALL
+RUN comfy-node-install comfyui-videohelpersuite comfyui-kjnodes comfyui-custom-scripts comfyui-wan-vace-prep comfymath seedvr2_videoupscaler comfyui-frame-interpolation tripleksampler comfyui-unload-model 
 
 # 7. EXPOSE THE STANDARD PORT
 EXPOSE 8188
