@@ -6,10 +6,12 @@ FROM ${BASE_IMAGE} AS base
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
 ARG COMFYUI_VERSION=latest
 
+# Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0"
+    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0" \
+    CMAKE_BUILD_PARALLEL_LEVEL=8
 
 # 3. INSTALL SYSTEM DEPS (Generic)
 RUN apt-get update && apt-get install -y \
@@ -32,20 +34,39 @@ RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSI
 
 WORKDIR /comfyui
 
-
-# Copy the config telling Comfy to look there
+# Copy the config telling Comfy to look at /network-volume
 COPY src/extra_model_paths.yaml ./
 
+WORKDIR /
 
-# 6. INSTALL YOUR CUSTOM NODES & REQS
+# 6. SCRIPTS & CUSTOM NODES
+# Add script to install custom nodes
+COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
+RUN chmod +x /usr/local/bin/comfy-node-install
+
+# Add script to configure Manager (Security) - RESTORED
+COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
+RUN chmod +x /usr/local/bin/comfy-manager-set-mode
+
+# Install Requirements (requests, websocket-client, sageattention)
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt
 
 # CUSTOM NODE INSTALL
-RUN comfy-node-install comfyui-videohelpersuite comfyui-kjnodes comfyui-custom-scripts comfyui-wan-vace-prep comfymath seedvr2_videoupscaler comfyui-frame-interpolation tripleksampler comfyui-unload-model 
+ENV PIP_NO_INPUT=1
+RUN comfy-node-install \
+    comfyui-videohelpersuite \
+    comfyui-kjnodes \
+    comfyui-custom-scripts \
+    comfyui-wan-vace-prep \
+    comfymath \
+    seedvr2_videoupscaler \
+    comfyui-frame-interpolation \
+    tripleksampler \
+    comfyui-unload-model 
 
 # 7. EXPOSE THE STANDARD PORT
 EXPOSE 8188
 
 # 8. DEFAULT CMD (Just runs Comfy normally)
-CMD ["python", "main.py", "--listen", "0.0.0.0"]g t
+CMD ["python", "main.py", "--listen", "0.0.0.0"]
