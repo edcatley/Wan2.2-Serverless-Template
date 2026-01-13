@@ -9,6 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # We set this initially, but we will overwrite it with lowercase in the first step
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
@@ -21,7 +22,6 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      # 1. CLEAN DISK (Using the Action you fixed)
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
         with:
@@ -32,6 +32,14 @@ jobs:
           large-packages: true
           docker-images: true
           swap-storage: true
+
+      # --- FIX START ---
+      # Docker requires repository names to be lowercase. 
+      # This bash command converts "User/Repo" to "user/repo".
+      - name: Lowercase Registry Image Name
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
+      # --- FIX END ---
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -97,7 +105,7 @@ jobs:
           file: ./runpod/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-runpod.outputs.tags }}
-          # Magic: This links the FROM instruction in runpod/Dockerfile to the image we just built
+          # This will now use the lowercase name correctly
           build-args: |
             BASE_IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:base-latest
 
