@@ -1,5 +1,3 @@
-import runpod
-from runpod.serverless.utils import rp_upload
 import json
 import urllib.request
 import urllib.parse
@@ -10,10 +8,8 @@ import base64
 from io import BytesIO
 import websocket
 import uuid
-import tempfile
 import socket
 import traceback
-from google.cloud import storage
 
 # Time to wait between API check attempts in milliseconds
 COMFY_API_AVAILABLE_INTERVAL_MS = 50
@@ -36,9 +32,6 @@ if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
 
 # Host where ComfyUI is running
 COMFY_HOST = "127.0.0.1:8188"
-# Enforce a clean state after each job is done
-# see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
-REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
@@ -169,11 +162,19 @@ def validate_input(job_input):
     # Optional: API key for Comfy.org API Nodes, passed per-request
     comfy_org_api_key = job_input.get("comfy_org_api_key")
 
+    # Optional: Dictionary mapping filenames to signed upload URLs
+    upload_urls = job_input.get("upload_urls", {})
+
+    # Optional: Output filename
+    output_filename = job_input.get("output_filename")
+
     # Return validated data and no error
     return {
         "workflow": workflow,
         "images": images,
         "comfy_org_api_key": comfy_org_api_key,
+        "upload_urls": upload_urls,
+        "output_filename": output_filename,
     }, None
 
 
@@ -492,34 +493,6 @@ def get_image_data(filename, subfolder, image_type):
         )
         return None
 
-# This is the key part of the solution
-def setup_gcs_credentials():
-    """
-    Reads GCS credentials from an environment variable, writes them to a
-    temporary file, and sets the GOOGLE_APPLICATION_CREDENTIALS env var.
-    """
-    # 1. Get the JSON credential content from the RunPod secret
-    gcs_credentials_string = os.environ.get('GCS_SA_KEY_JSON')
-
-    if not gcs_credentials_string:
-        print("GCS_SA_KEY_JSON secret not found. GCS will not be available.")
-        return
-
-    # 2. Define a path in the container's temporary file system
-    #    This file will be automatically cleaned up when the pod spins down.
-    credentials_path = "/tmp/gcs_key.json"
-
-    # 3. Write the content to the file
-    with open(credentials_path, "w") as f:
-        f.write(gcs_credentials_string)
-
-    # 4. Set the environment variable that the Google Cloud library expects
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-    print("GCS credentials set up successfully.")
-
-setup_gcs_credentials()
-storage_client = None
-
 def handler(job):
     """
     Handles a job using ComfyUI via websockets for status and image retrieval.
@@ -530,8 +503,6 @@ def handler(job):
     Returns:
         dict: A dictionary containing either an error message or a success status with generated images.
     """
-            # This allows us to modify the global client variable from within the handler
-    global storage_client 
     job_input = job["input"]
     job_id = job["id"]
 
@@ -542,6 +513,7 @@ def handler(job):
 
     # Extract validated data
     workflow = validated_data["workflow"]
+    print(f"worker-comfyui - DEBUG: Workflow JSON: {json.dumps(workflow)}")
     input_images = validated_data.get("images")
 
     # Make sure that the ComfyUI HTTP API is available before proceeding
@@ -719,66 +691,34 @@ def handler(job):
                         file_bytes = get_image_data(original_filename, subfolder, file_type)
 
                         if file_bytes:
-                            # --- UPLOAD LOGIC: Prioritize GCS, then S3, then Base64 ---
-
-                            # 1. Google Cloud Storage Upload
-                            # Check if the required environment variables are set
-                            if os.environ.get("GCS_BUCKET_NAME") and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+                            # Check if we have a signed URL for this specific file
+                            upload_url = validated_data.get("upload_urls", {}).get(original_filename)
+                            
+                            if upload_url:
+                                # Upload to signed URL
                                 try:
-                                    # NEW: Initialize the client only if it hasn't been already.
-                                    # This is highly efficient for serverless workers.
-                                    if storage_client is None:
-                                        print("worker-comfyui - Initializing Google Cloud Storage client...")
-                                        storage_client = storage.Client()
+                                    print(f"worker-comfyui - Uploading {original_filename} to signed URL...")
                                     
-                                    bucket_name = os.environ.get("GCS_BUCKET_NAME")
-                                    bucket = storage_client.bucket(bucket_name)
+                                    # Determine content type from filename
+                                    content_type = "application/octet-stream"  # Default
+                                    if original_filename.endswith(('.mp4', '.mov', '.avi')):
+                                        content_type = "video/mp4"
+                                    elif original_filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                                        content_type = "image/png"
+                                    elif original_filename.endswith('.gif'):
+                                        content_type = "image/gif"
                                     
-                                    # Create a new filename using the job_id as requested
-                                    new_filename = f"{job_id}.mp4"
-                                    blob = bucket.blob(new_filename)
-
-                                    print(f"worker-comfyui - Uploading {new_filename} to GCS bucket {bucket_name}...")
-                                    blob.upload_from_string(file_bytes, content_type='video/mp4')
-                                    
-                                    # --- SMART URL GENERATION ---
-                                    gcs_make_public = os.environ.get("GCS_MAKE_PUBLIC", "false").lower() == "true"
-                                    
-                                    if gcs_make_public:
-                                        url = blob.public_url
-                                        url_type = "gcs_public_url"
-                                        print(f"worker-comfyui - Generated Public URL: {url}")
-                                    else:
-                                        expiration_time = datetime.timedelta(minutes=15)
-                                        url = blob.generate_signed_url(expiration=expiration_time)
-                                        url_type = "gcs_signed_url"
-                                        print(f"worker-comfyui - Generated Signed URL (valid for 15 mins): {url}")
-
-                                    output_data.append({"filename": new_filename, "type": url_type, "data": url})
-
+                                    headers = {"Content-Type": content_type}
+                                    response = requests.put(upload_url, data=file_bytes, headers=headers, timeout=60)
+                                    response.raise_for_status()
+                                    print(f"worker-comfyui - Successfully uploaded {original_filename} to signed URL")
+                                    output_data.append({"filename": original_filename, "type": "uploaded", "url": upload_url})
                                 except Exception as e:
-                                    # Add more detailed error logging
-                                    error_msg = f"Error uploading {new_filename} to GCS. Check bucket permissions and credentials. Details: {e}"
+                                    error_msg = f"Error uploading {original_filename} to signed URL: {e}"
                                     print(f"worker-comfyui - {error_msg}")
                                     errors.append(error_msg)
                             
-                            # 2. S3 (Runpod Storage) Upload
-                            elif os.environ.get("BUCKET_ENDPOINT_URL"):
-                                try:
-                                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
-                                        temp_file.write(file_bytes)
-                                        temp_file_path = temp_file.name
-                                    
-                                    s3_url = rp_upload.upload_image(job_id, temp_file_path)
-                                    os.remove(temp_file_path)
-                                    print(f"worker-comfyui - Uploaded {original_filename} to S3: {s3_url}")
-                                    output_data.append({"filename": original_filename, "type": "s3_url", "data": s3_url})
-                                except Exception as e:
-                                    error_msg = f"Error uploading {original_filename} to S3: {e}"
-                                    print(f"worker-comfyui - {error_msg}")
-                                    errors.append(error_msg)
-                            
-                            # 3. Base64 Fallback
+                            # Base64 Fallback
                             else:
                                 try:
                                     base64_file = base64.b64encode(file_bytes).decode("utf-8")
@@ -841,6 +781,5 @@ def handler(job):
     return final_result
 
 
-if __name__ == "__main__":
-    print("worker-comfyui - Starting handler...")
-    runpod.serverless.start({"handler": handler})
+# This is a generic handler module meant to be imported by platform-specific wrappers
+# See runpod/handler.py for an example

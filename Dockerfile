@@ -11,7 +11,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0" \
-    CMAKE_BUILD_PARALLEL_LEVEL=8
+    CMAKE_BUILD_PARALLEL_LEVEL=8 \
+    UV_HTTP_TIMEOUT=600
 
 # 3. INSTALL SYSTEM DEPS (Generic)
 RUN apt-get update && apt-get install -y \
@@ -51,6 +52,9 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Install Requirements (requests, websocket-client, sageattention)
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt
+
+# Copy generic base handler (used by platform-specific wrappers)
+COPY src/ /src/
 
 # CUSTOM NODE INSTALL
 ENV PIP_NO_INPUT=1

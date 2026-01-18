@@ -1,0 +1,51 @@
+@echo off
+echo ============================================================
+echo RunPod Local Orchestrator - Shutdown Script
+echo ============================================================
+echo.
+
+REM Check if Docker is running
+docker info >nul 2>&1
+if errorlevel 1 (
+    echo [WARNING] Docker is not running, nothing to stop
+    pause
+    exit /b 0
+)
+
+REM Stop Redis container
+echo [INFO] Stopping Redis container...
+docker ps --filter "name=redis" --format "{{.Names}}" | findstr /x "redis" >nul
+if errorlevel 1 (
+    echo [INFO] Redis container not running
+) else (
+    docker stop redis
+    echo [OK] Redis container stopped
+)
+
+REM Find and stop all RunPod worker containers
+echo.
+echo [INFO] Looking for RunPod worker containers...
+for /f "tokens=*" %%i in ('docker ps --filter "ancestor=runpod-comfyui:latest" --format "{{.ID}}"') do (
+    echo [INFO] Stopping container %%i...
+    docker stop %%i
+    docker rm %%i
+    echo [OK] Container %%i stopped and removed
+)
+
+REM Also check for any containers using the base image
+for /f "tokens=*" %%i in ('docker ps --filter "ancestor=comfyui-base:latest" --format "{{.ID}}"') do (
+    echo [INFO] Stopping container %%i...
+    docker stop %%i
+    docker rm %%i
+    echo [OK] Container %%i stopped and removed
+)
+
+echo.
+echo ============================================================
+echo Cleanup complete!
+echo.
+echo Redis container: stopped (still exists, use 'docker rm redis' to remove)
+echo Worker containers: stopped and removed
+echo ============================================================
+echo.
+pause
