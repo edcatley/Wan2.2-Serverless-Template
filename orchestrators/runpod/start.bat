@@ -14,32 +14,20 @@ if errorlevel 1 (
 )
 echo [OK] Docker is running
 
-REM Check if Redis container exists
-docker ps -a --filter "name=redis" --format "{{.Names}}" | findstr /x "redis" >nul
+REM Try to start Redis (will create if doesn't exist, or start if stopped)
+echo [INFO] Starting Redis container...
+docker start redis >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Creating Redis container...
-    docker run -d -p 6379:6379 --name redis redis:7-alpine
+    echo [INFO] Redis container doesn't exist, creating...
+    docker run -d -p 6379:6379 --name redis redis:7-alpine >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Failed to create Redis container
         pause
         exit /b 1
     )
-    echo [OK] Redis container created
+    echo [OK] Redis container created and started
 ) else (
-    REM Container exists, check if it's running
-    docker ps --filter "name=redis" --format "{{.Names}}" | findstr /x "redis" >nul
-    if errorlevel 1 (
-        echo [INFO] Starting existing Redis container...
-        docker start redis
-        if errorlevel 1 (
-            echo [ERROR] Failed to start Redis container
-            pause
-            exit /b 1
-        )
-        echo [OK] Redis container started
-    ) else (
-        echo [OK] Redis container already running
-    )
+    echo [OK] Redis container started
 )
 
 REM Wait a moment for Redis to be ready
@@ -55,8 +43,28 @@ if not exist .env (
     pause
 )
 
-REM Install Python dependencies
+REM Create/activate virtual environment
 echo.
+if not exist venv (
+    echo [INFO] Creating virtual environment...
+    python -m venv venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment
+        pause
+        exit /b 1
+    )
+    echo [OK] Virtual environment created
+)
+
+echo [INFO] Activating virtual environment...
+call venv\Scripts\activate.bat
+if errorlevel 1 (
+    echo [ERROR] Failed to activate virtual environment
+    pause
+    exit /b 1
+)
+
+REM Install Python dependencies
 echo [INFO] Installing Python dependencies...
 pip install -q -r requirements.txt
 if errorlevel 1 (
@@ -70,8 +78,8 @@ REM Start the orchestrator
 echo.
 echo ============================================================
 echo Starting RunPod Local Orchestrator
-echo API will be available at: http://localhost:8000
-echo Health check: http://localhost:8000/health
+echo API will be available at: http://localhost:8001
+echo Health check: http://localhost:8001/health
 echo.
 echo Press Ctrl+C to stop
 echo ============================================================

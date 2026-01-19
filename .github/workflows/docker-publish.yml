@@ -3,7 +3,6 @@ name: Docker Build (Base + RunPod)
 on:
   push:
     tags: [ 'v*.*.*' ]
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 

@@ -12,13 +12,20 @@ if errorlevel 1 (
     exit /b 0
 )
 
+REM Kill any Python processes on port 8001 (orchestrator)
+echo [INFO] Stopping orchestrator processes on port 8001...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do (
+    echo [INFO] Killing process %%a...
+    taskkill /F /PID %%a >nul 2>&1
+)
+echo [OK] Orchestrator processes stopped
+
 REM Stop Redis container
 echo [INFO] Stopping Redis container...
-docker ps --filter "name=redis" --format "{{.Names}}" | findstr /x "redis" >nul
+docker stop redis >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Redis container not running
+    echo [INFO] Redis container not running or already stopped
 ) else (
-    docker stop redis
     echo [OK] Redis container stopped
 )
 
@@ -44,6 +51,7 @@ echo.
 echo ============================================================
 echo Cleanup complete!
 echo.
+echo Orchestrator: stopped
 echo Redis container: stopped (still exists, use 'docker rm redis' to remove)
 echo Worker containers: stopped and removed
 echo ============================================================

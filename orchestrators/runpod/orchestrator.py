@@ -22,11 +22,19 @@ else:
     print(f"[Orchestrator] No .env file found at {env_path}, using system environment")
 
 
-def start_api_server(host="0.0.0.0", port=8000):
+def start_api_server(host="0.0.0.0", port=8001):
     """Start FastAPI server in current thread"""
     print(f"[Orchestrator] Starting API server on {host}:{port}")
+    
+    # Initialize Redis before starting server
     api.init_redis(host=os.environ.get("REDIS_HOST", "localhost"))
-    uvicorn.run(api.app, host=host, port=port, log_level="info")
+    
+    # Configure logging to reduce spam - only show warnings/errors
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
+    
+    # Run uvicorn with the app object directly
+    uvicorn.run(api.app, host=host, port=port, log_level="warning", log_config=log_config)
 
 
 def start_worker_manager():
@@ -71,8 +79,8 @@ def main():
     
     print("\n" + "=" * 60)
     print("Orchestrator running!")
-    print("API: http://localhost:8000")
-    print("Health: http://localhost:8000/health")
+    print("API: http://localhost:8001")
+    print("Health: http://localhost:8001/health")
     print("Press Ctrl+C to stop")
     print("=" * 60 + "\n")
     

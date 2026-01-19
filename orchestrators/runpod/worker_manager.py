@@ -79,11 +79,24 @@ class WorkerManager:
         
         container = None
         try:
+            worker_id = f"local-worker-{job_id}"
+            
+            # Store job for this specific worker (don't put back in queue!)
+            self.redis_client.set(
+                f"runpod:worker:{worker_id}:job",
+                json.dumps(job),
+                ex=3600
+            )
+            
+            # Set environment variables for RunPod SDK
+            # These are the ONLY env vars the SDK actually uses (verified from SDK source code)
             env_vars = {
-                "JOB_ID": job_id,
-                "JOB_INPUT": json.dumps(job["input"]),
-                "RUNPOD_POD_ID": "local-pod-001",
-                "RUNPOD_ENDPOINT_ID": "local-endpoint",
+                "RUNPOD_POD_ID": worker_id,
+                "RUNPOD_WEBHOOK_GET_JOB": f"http://host.docker.internal:8001/worker/{worker_id}/job?",
+                "RUNPOD_WEBHOOK_POST_OUTPUT": f"http://host.docker.internal:8001/worker/{worker_id}/result?",
+                "RUNPOD_AI_API_KEY": "local-test-key",
+                "RUNPOD_PING_INTERVAL": "60000",  # Heartbeat interval in ms
+                "RUNPOD_LOG_LEVEL": "INFO",  # DEBUG, INFO, WARN, ERROR
             }
             
             volumes = {}
@@ -92,6 +105,22 @@ class WorkerManager:
                 print(f"[Worker {job_id}] Mounting models from {self.models_path}")
             
             print(f"[Worker {job_id}] Starting container from {self.image_name}")
+            
+            # Try to use GPU if available
+            device_requests = []
+            try:
+                # Check if NVIDIA runtime is available
+                self.docker_client.containers.run(
+                    "nvidia/cuda:11.8.0-base-ubuntu22.04",
+                    "nvidia-smi",
+                    remove=True,
+                    device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
+                )
+                device_requests = [docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
+                print(f"[Worker {job_id}] GPU support enabled")
+            except Exception as e:
+                print(f"[Worker {job_id}] No GPU support available, running CPU-only: {e}")
+            
             container = self.docker_client.containers.run(
                 self.image_name,
                 environment=env_vars,
@@ -99,65 +128,70 @@ class WorkerManager:
                 remove=False,
                 volumes=volumes,
                 mem_limit="8g",
+                device_requests=device_requests,
             )
             
-            print(f"[Worker {job_id}] Container {container.short_id} started")
+            print(f"[Worker {job_id}] Container {container.short_id} started, worker ID: {worker_id}")
             
-            result = container.wait()
-            exit_code = result.get("StatusCode", -1)
-            logs = container.logs().decode('utf-8', errors='replace')
+            # Wait for the job to complete by polling Redis
+            print(f"[Worker {job_id}] Waiting for job completion...")
+            timeout = 300  # 5 minutes
+            poll_interval = 2  # seconds
+            elapsed = 0
             
-            completed_at = time.time()
-            
-            if exit_code == 0:
-                print(f"[Worker {job_id}] Container completed successfully")
+            while elapsed < timeout:
+                status_data = self.redis_client.get(f"runpod:status:{job_id}")
+                if status_data:
+                    status = json.loads(status_data)
+                    if status.get("status") == "COMPLETED":
+                        print(f"[Worker {job_id}] Job completed successfully")
+                        break
                 
-                # Extract result from logs between markers
-                if "=== RESULT START ===" in logs and "=== RESULT END ===" in logs:
-                    start = logs.index("=== RESULT START ===") + len("=== RESULT START ===")
-                    end = logs.index("=== RESULT END ===")
-                    result_json = logs[start:end].strip()
-                    
-                    self.redis_client.set(f"runpod:result:{job_id}", result_json, ex=3600)
-                    self.redis_client.set(
-                        f"runpod:status:{job_id}",
-                        json.dumps({
-                            "status": "COMPLETED",
-                            "created_at": job.get("created_at", started_at),
-                            "started_at": started_at,
-                            "completed_at": completed_at
-                        }),
-                        ex=3600
-                    )
-                else:
-                    print(f"[Worker {job_id}] WARNING: No result markers found in logs")
-                    self.redis_client.set(
-                        f"runpod:result:{job_id}",
-                        json.dumps({"error": "No result found in container output"}),
-                        ex=3600
-                    )
+                time.sleep(poll_interval)
+                elapsed += poll_interval
             else:
-                print(f"[Worker {job_id}] Container failed with exit code {exit_code}")
+                print(f"[Worker {job_id}] Job timed out after {timeout} seconds")
                 self.redis_client.set(
                     f"runpod:result:{job_id}",
-                    json.dumps({"error": f"Container exited with code {exit_code}", "logs": logs[-1000:]}),
-                    ex=3600
-                )
-                self.redis_client.set(
-                    f"runpod:status:{job_id}",
-                    json.dumps({
-                        "status": "FAILED",
-                        "created_at": job.get("created_at", started_at),
-                        "started_at": started_at,
-                        "completed_at": completed_at
-                    }),
+                    json.dumps({"error": f"Job timed out after {timeout} seconds"}),
                     ex=3600
                 )
             
+            # Give worker a few seconds to finish posting result and polling once more
+            print(f"[Worker {job_id}] Waiting 5 seconds before stopping container...")
+            time.sleep(5)
+            
+            # Now forcibly stop the container
+            print(f"[Worker {job_id}] Stopping container...")
             try:
-                container.remove()
+                container.stop(timeout=5)
             except:
                 pass
+            
+            # Get container logs for debugging
+            try:
+                logs = container.logs().decode('utf-8', errors='replace')
+                print(f"[Worker {job_id}] Container logs (last 500 chars):\n{logs[-500:]}")
+            except:
+                pass
+            
+            # Result should already be in Redis from the webhook
+            # Just verify it's there
+            result_data = self.redis_client.get(f"runpod:result:{job_id}")
+            if not result_data:
+                print(f"[Worker {job_id}] WARNING: No result found in Redis")
+                self.redis_client.set(
+                    f"runpod:result:{job_id}",
+                    json.dumps({"error": "Worker did not post result"}),
+                    ex=3600
+                )
+            
+            # Clean up container
+            try:
+                container.remove(force=True)
+                print(f"[Worker {job_id}] Container removed")
+            except Exception as e:
+                print(f"[Worker {job_id}] Failed to remove container: {e}")
                 
         except docker.errors.ImageNotFound:
             error_msg = f"Docker image '{self.image_name}' not found"
