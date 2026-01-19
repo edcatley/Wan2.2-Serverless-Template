@@ -148,7 +148,7 @@ def validate_input(job_input):
     if workflow is None:
         return None, "Missing 'workflow' parameter"
 
-    # Validate 'images' in input, if provided
+    # Validate 'images' in input, if provided (base64 encoded)
     images = job_input.get("images")
     if images is not None:
         if not isinstance(images, list) or not all(
@@ -157,6 +157,28 @@ def validate_input(job_input):
             return (
                 None,
                 "'images' must be a list of objects with 'name' and 'image' keys",
+            )
+
+    # Validate 'image_urls' in input, if provided (signed download URLs)
+    image_urls = job_input.get("image_urls")
+    if image_urls is not None:
+        if not isinstance(image_urls, list) or not all(
+            "name" in item and "url" in item for item in image_urls
+        ):
+            return (
+                None,
+                "'image_urls' must be a list of objects with 'name' and 'url' keys",
+            )
+
+    # Validate 'video_urls' in input, if provided (signed download URLs for videos)
+    video_urls = job_input.get("video_urls")
+    if video_urls is not None:
+        if not isinstance(video_urls, list) or not all(
+            "name" in item and "url" in item for item in video_urls
+        ):
+            return (
+                None,
+                "'video_urls' must be a list of objects with 'name' and 'url' keys",
             )
 
     # Optional: API key for Comfy.org API Nodes, passed per-request
@@ -172,6 +194,8 @@ def validate_input(job_input):
     return {
         "workflow": workflow,
         "images": images,
+        "image_urls": image_urls,
+        "video_urls": video_urls,
         "comfy_org_api_key": comfy_org_api_key,
         "upload_urls": upload_urls,
         "output_filename": output_filename,
@@ -294,6 +318,91 @@ def upload_images(images):
     return {
         "status": "success",
         "message": "All images uploaded successfully",
+        "details": responses,
+    }
+
+
+def download_and_upload_files(file_urls, file_type="image"):
+    """
+    Download files from signed URLs and upload them to ComfyUI.
+
+    Args:
+        file_urls (list): A list of dictionaries, each containing 'name' and 'url' keys.
+        file_type (str): Type of file - "image" or "video" (default: "image")
+
+    Returns:
+        dict: A dictionary indicating success or error.
+    """
+    if not file_urls:
+        return {"status": "success", "message": f"No {file_type}s to download", "details": []}
+
+    responses = []
+    download_errors = []
+
+    print(f"worker-comfyui - Downloading and uploading {len(file_urls)} {file_type}(s) from URLs...")
+
+    for file_item in file_urls:
+        try:
+            name = file_item["name"]
+            url = file_item["url"]
+
+            print(f"worker-comfyui - Downloading {name} from {url[:100]}...")
+            
+            # Download the file from the signed URL
+            response = requests.get(url, timeout=120)
+            response.raise_for_status()
+            file_bytes = response.content
+
+            print(f"worker-comfyui - Downloaded {name} ({len(file_bytes)} bytes), uploading to ComfyUI...")
+
+            # Determine the appropriate endpoint and content type
+            if file_type == "video":
+                # For videos, use the /upload/video endpoint (if available)
+                # Note: ComfyUI's video upload endpoint might vary by version
+                endpoint = f"http://{COMFY_HOST}/upload/video"
+                content_type = "video/mp4"
+            else:
+                endpoint = f"http://{COMFY_HOST}/upload/image"
+                content_type = "image/png"
+
+            # Prepare the form data
+            files = {
+                file_type: (name, BytesIO(file_bytes), content_type),
+                "overwrite": (None, "true"),
+            }
+
+            # POST request to upload the file
+            upload_response = requests.post(endpoint, files=files, timeout=60)
+            upload_response.raise_for_status()
+
+            responses.append(f"Successfully downloaded and uploaded {name}")
+            print(f"worker-comfyui - Successfully uploaded {name} to ComfyUI")
+
+        except requests.Timeout:
+            error_msg = f"Timeout downloading or uploading {file_item.get('name', 'unknown')}"
+            print(f"worker-comfyui - {error_msg}")
+            download_errors.append(error_msg)
+        except requests.RequestException as e:
+            error_msg = f"Error downloading or uploading {file_item.get('name', 'unknown')}: {e}"
+            print(f"worker-comfyui - {error_msg}")
+            download_errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error processing {file_item.get('name', 'unknown')}: {e}"
+            print(f"worker-comfyui - {error_msg}")
+            download_errors.append(error_msg)
+
+    if download_errors:
+        print(f"worker-comfyui - {file_type}(s) download/upload finished with errors")
+        return {
+            "status": "error",
+            "message": f"Some {file_type}s failed to download/upload",
+            "details": download_errors,
+        }
+
+    print(f"worker-comfyui - {file_type}(s) download/upload complete")
+    return {
+        "status": "success",
+        "message": f"All {file_type}s downloaded and uploaded successfully",
         "details": responses,
     }
 
@@ -515,6 +624,8 @@ def handler(job):
     workflow = validated_data["workflow"]
     print(f"worker-comfyui - DEBUG: Workflow JSON: {json.dumps(workflow)}")
     input_images = validated_data.get("images")
+    image_urls = validated_data.get("image_urls")
+    video_urls = validated_data.get("video_urls")
 
     # Make sure that the ComfyUI HTTP API is available before proceeding
     if not check_server(
@@ -526,14 +637,31 @@ def handler(job):
             "error": f"ComfyUI server ({COMFY_HOST}) not reachable after multiple retries."
         }
 
-    # Upload input images if they exist
+    # Upload base64 encoded images if they exist
     if input_images:
         upload_result = upload_images(input_images)
         if upload_result["status"] == "error":
-            # Return upload errors
             return {
                 "error": "Failed to upload one or more input images",
                 "details": upload_result["details"],
+            }
+
+    # Download and upload images from URLs if they exist
+    if image_urls:
+        download_result = download_and_upload_files(image_urls, file_type="image")
+        if download_result["status"] == "error":
+            return {
+                "error": "Failed to download/upload one or more images from URLs",
+                "details": download_result["details"],
+            }
+
+    # Download and upload videos from URLs if they exist
+    if video_urls:
+        download_result = download_and_upload_files(video_urls, file_type="video")
+        if download_result["status"] == "error":
+            return {
+                "error": "Failed to download/upload one or more videos from URLs",
+                "details": download_result["details"],
             }
 
     ws = None
