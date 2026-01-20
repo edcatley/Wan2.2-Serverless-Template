@@ -56,6 +56,10 @@ RUN uv pip install --no-cache-dir -r requirements.txt
 # Copy generic base handler (used by platform-specific wrappers)
 COPY src/ /src/
 
+# Add demo data for mock workflows to ComfyUI's input directory
+COPY test-data/ /comfyui/input/demo/
+
+
 # CUSTOM NODE INSTALL
 ENV PIP_NO_INPUT=1
 RUN comfy-node-install \
