@@ -1,0 +1,41 @@
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+**/venv/
+**/env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+.env
+.env.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker
+*.tar
+
+# Test outputs
+test-output/
+outputs/
+temp/

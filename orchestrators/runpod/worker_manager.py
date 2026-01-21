@@ -96,7 +96,7 @@ class WorkerManager:
                 "RUNPOD_WEBHOOK_POST_OUTPUT": f"http://host.docker.internal:8001/worker/{worker_id}/result?",
                 "RUNPOD_AI_API_KEY": "local-test-key",
                 "RUNPOD_PING_INTERVAL": "60000",  # Heartbeat interval in ms
-                "RUNPOD_LOG_LEVEL": "INFO",  # DEBUG, INFO, WARN, ERROR
+                "RUNPOD_LOG_LEVEL": "DEBUG",  # DEBUG, INFO, WARN, ERROR
             }
             
             volumes = {}
@@ -135,21 +135,45 @@ class WorkerManager:
             
             # Wait for the job to complete by polling Redis
             print(f"[Worker {job_id}] Waiting for job completion...")
-            timeout = 300  # 5 minutes
-            poll_interval = 2  # seconds
+            timeout = 600  # 10 minutes
+            poll_interval = 1  # seconds (faster polling)
             elapsed = 0
+            job_finished = False
             
             while elapsed < timeout:
+                # Check if container is still running
+                try:
+                    container.reload()
+                    if container.status not in ['running', 'created']:
+                        print(f"[Worker {job_id}] Container stopped unexpectedly with status: {container.status}")
+                        # Check if result was posted before container died
+                        result_data = self.redis_client.get(f"runpod:result:{job_id}")
+                        if not result_data:
+                            self.redis_client.set(
+                                f"runpod:result:{job_id}",
+                                json.dumps({"error": f"Container stopped with status: {container.status}"}),
+                                ex=3600
+                            )
+                        break
+                except Exception as e:
+                    print(f"[Worker {job_id}] Error checking container status: {e}")
+                
+                # Check Redis for completion
                 status_data = self.redis_client.get(f"runpod:status:{job_id}")
                 if status_data:
                     status = json.loads(status_data)
-                    if status.get("status") == "COMPLETED":
-                        print(f"[Worker {job_id}] Job completed successfully")
+                    job_status = status.get("status")
+                    
+                    # Check for any terminal status
+                    if job_status in ["COMPLETED", "FAILED", "CANCELLED"]:
+                        print(f"[Worker {job_id}] Job finished with status: {job_status}")
+                        job_finished = True
                         break
                 
                 time.sleep(poll_interval)
                 elapsed += poll_interval
-            else:
+            
+            if not job_finished and elapsed >= timeout:
                 print(f"[Worker {job_id}] Job timed out after {timeout} seconds")
                 self.redis_client.set(
                     f"runpod:result:{job_id}",
@@ -157,11 +181,12 @@ class WorkerManager:
                     ex=3600
                 )
             
-            # Give worker a few seconds to finish posting result and polling once more
-            print(f"[Worker {job_id}] Waiting 5 seconds before stopping container...")
-            time.sleep(5)
+            # Give worker a moment to finish any final operations
+            if job_finished:
+                print(f"[Worker {job_id}] Waiting 2 seconds for final cleanup...")
+                time.sleep(2)
             
-            # Now forcibly stop the container
+            # Stop the container
             print(f"[Worker {job_id}] Stopping container...")
             try:
                 container.stop(timeout=5)

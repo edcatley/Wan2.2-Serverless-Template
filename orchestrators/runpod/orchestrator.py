@@ -33,8 +33,16 @@ def start_api_server(host="0.0.0.0", port=8001):
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
     
-    # Run uvicorn with the app object directly
-    uvicorn.run(api.app, host=host, port=port, log_level="warning", log_config=log_config)
+    # Run uvicorn with increased timeouts for large payloads
+    uvicorn.run(
+        api.app, 
+        host=host, 
+        port=port, 
+        log_level="warning", 
+        log_config=log_config,
+        timeout_keep_alive=300,  # 5 minutes keep-alive
+        timeout_graceful_shutdown=30
+    )
 
 
 def start_worker_manager():

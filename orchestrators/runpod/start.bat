@@ -87,12 +87,4 @@ echo.
 
 python orchestrator.py
 
-REM If orchestrator exits, ask if user wants to stop Redis
-echo.
-echo Orchestrator stopped.
-set /p STOP_REDIS="Stop Redis container? (y/n): "
-if /i "%STOP_REDIS%"=="y" (
-    echo Stopping Redis...
-    docker stop redis
-    echo Redis stopped. Container still exists, will restart next time.
-)
+

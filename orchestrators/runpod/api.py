@@ -41,21 +41,40 @@ async def health():
     try:
         redis_client.ping()
         
-        # Get queue stats
+        # Get actual queue stats
         queue_length = redis_client.llen("runpod:queue")
+        
+        # Count jobs by status
+        in_progress = 0
+        completed = 0
+        failed = 0
+        
+        # Get all status keys
+        status_keys = redis_client.keys("runpod:status:*")
+        for key in status_keys:
+            status_data = redis_client.get(key)
+            if status_data:
+                status = json.loads(status_data)
+                job_status = status.get("status")
+                if job_status == "IN_PROGRESS":
+                    in_progress += 1
+                elif job_status == "COMPLETED":
+                    completed += 1
+                elif job_status == "FAILED":
+                    failed += 1
         
         return {
             "status": "running",
             "jobs": {
-                "completed": 0,
-                "failed": 0,
-                "inProgress": 0,
+                "completed": completed,
+                "failed": failed,
+                "inProgress": in_progress,
                 "inQueue": queue_length,
                 "retried": 0
             },
             "workers": {
                 "idle": 0,
-                "running": 0,
+                "running": in_progress,  # Approximate: 1 worker per in-progress job
                 "throttled": 0
             }
         }
@@ -267,13 +286,27 @@ async def receive_result_from_worker(worker_id: str, request: Request, isStream:
     Query params:
     - isStream: "true" or "false" indicating if this is a streaming update
     """
+    print(f"\n{'='*80}")
+    print(f"[API] *** INCOMING POST *** to /worker/{worker_id}/result")
+    print(f"[API] Full URL: {request.url}")
+    print(f"[API] Headers: {dict(request.headers)}")
+    print(f"[API] isStream: {isStream}")
+    print(f"{'='*80}\n")
+    print(f"[API] Starting to read body...")
+    
     # Get raw body to see what SDK is sending
-    body = await request.body()
-    body_str = body.decode('utf-8')
-    print(f"[API] Received result from {worker_id}, body: {body_str[:500]}")
+    try:
+        body = await request.body()
+        body_str = body.decode('utf-8')
+        print(f"[API] Body length: {len(body_str)} bytes")
+        print(f"[API] Body preview: {body_str[:500]}")
+    except Exception as e:
+        print(f"[API] ERROR reading body: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to read body: {e}")
     
     try:
         result = json.loads(body_str)
+        print(f"[API] Successfully parsed JSON")
     except Exception as e:
         print(f"[API] ERROR: Failed to parse result JSON: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
@@ -311,6 +344,10 @@ async def receive_result_from_worker(worker_id: str, request: Request, isStream:
     # Extract output - could be nested or at root level
     output = result.get("output", result)
     
+    # Check if this is an error result
+    has_error = "error" in output or "errors" in output
+    final_status = "FAILED" if has_error else "COMPLETED"
+    
     # Store the result
     redis_client.set(
         f"runpod:result:{job_id}",
@@ -318,11 +355,11 @@ async def receive_result_from_worker(worker_id: str, request: Request, isStream:
         ex=3600
     )
     
-    # Update status to COMPLETED
+    # Update status to COMPLETED or FAILED
     redis_client.set(
         f"runpod:status:{job_id}",
         json.dumps({
-            "status": "COMPLETED",
+            "status": final_status,
             "created_at": status.get("created_at", completed_at),
             "started_at": status.get("started_at", completed_at),
             "completed_at": completed_at,
@@ -331,6 +368,6 @@ async def receive_result_from_worker(worker_id: str, request: Request, isStream:
         ex=3600
     )
     
-    print(f"[API] Worker {worker_id} completed job {job_id}")
+    print(f"[API] Worker {worker_id} completed job {job_id} with status: {final_status}")
     
     return {"status": "success"}

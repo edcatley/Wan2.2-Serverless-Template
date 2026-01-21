@@ -20,13 +20,14 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') 
 )
 echo [OK] Orchestrator processes stopped
 
-REM Stop Redis container
-echo [INFO] Stopping Redis container...
+REM Stop and remove Redis container
+echo [INFO] Stopping and removing Redis container...
 docker stop redis >nul 2>&1
+docker rm redis >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Redis container not running or already stopped
+    echo [INFO] Redis container not found or already removed
 ) else (
-    echo [OK] Redis container stopped
+    echo [OK] Redis container stopped and removed
 )
 
 REM Find and stop all RunPod worker containers
@@ -52,7 +53,7 @@ echo ============================================================
 echo Cleanup complete!
 echo.
 echo Orchestrator: stopped
-echo Redis container: stopped (still exists, use 'docker rm redis' to remove)
+echo Redis container: stopped and removed
 echo Worker containers: stopped and removed
 echo ============================================================
 echo.
