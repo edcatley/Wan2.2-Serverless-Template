@@ -42,7 +42,7 @@ echo ========================================
 echo.
 
 REM Run the test
-python test_workflow_no_input.py
+python test_preprocessing_workflow.py
 
 echo.
 echo ========================================

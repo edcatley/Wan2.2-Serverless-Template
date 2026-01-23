@@ -52,7 +52,7 @@
   },
   "5": {
     "inputs": {
-      "directory": "",
+      "directory": "/comfyui/input/demo/images/head/",
       "image_load_cap": 0,
       "skip_first_images": 0,
       "select_every_nth": 1
@@ -64,7 +64,7 @@
   },
   "6": {
     "inputs": {
-      "directory": "",
+      "directory": "/comfyui/input/demo/images/tail/",
       "image_load_cap": 0,
       "skip_first_images": 0,
       "select_every_nth": 1
@@ -76,7 +76,7 @@
   },
   "7": {
     "inputs": {
-      "video": "",
+      "video": "/comfyui/input/demo/videos/neutral_00001.mp4",
       "force_rate": 0,
       "custom_width": 0,
       "custom_height": 0,
@@ -100,6 +100,17 @@
     "class_type": "VHS_VideoInfoLoaded",
     "_meta": {
       "title": "Video Info (Loaded) 🎥🅥🅗🅢"
+    }
+  },
+  "10": {
+    "inputs": {
+      "image": "/comfyui/input/preprocessed.png",
+      "custom_width": 0,
+      "custom_height": 0
+    },
+    "class_type": "VHS_LoadImagePath",
+    "_meta": {
+      "title": "Load Image (Path) 🎥🅥🅗🅢"
     }
   }
 }
