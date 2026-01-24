@@ -54,14 +54,14 @@ def main():
     # Node 7 will load images 0-15 (head)
     # Node 8 will skip first 17 and load images 17-32 (tail)
     
-    image_urls = []
+    download_urls = []
     
     # Head images (16 frames) - will be first alphabetically
     for i in range(1, 17):
         filename = f"head_{i:05d}_.png"
         storage_path = f"{INPUT_HEAD_PREFIX}/{filename}"
         url = generate_storage_url(storage_path, method="GET")
-        image_urls.append({
+        download_urls.append({
             "name": filename,
             "url": url
         })
@@ -69,7 +69,7 @@ def main():
     # Preprocessed image (will be 17th alphabetically)
     preprocessed_storage_path = "test-data/output/preprocessed_00001_.png"  # Actual filename in storage
     preprocessed_url = generate_storage_url(preprocessed_storage_path, method="GET")
-    image_urls.append({
+    download_urls.append({
         "name": "preprocessed.png",  # Save as clean name in container
         "url": preprocessed_url
     })
@@ -79,7 +79,7 @@ def main():
         filename = f"tail_{i:05d}_.png"
         storage_path = f"{INPUT_TAIL_PREFIX}/{filename}"
         url = generate_storage_url(storage_path, method="GET")
-        image_urls.append({
+        download_urls.append({
             "name": filename,
             "url": url
         })
@@ -88,7 +88,7 @@ def main():
     print(f"  Head images: {INPUT_HEAD_PREFIX}/ (16 files)")
     print(f"  Preprocessed image: {preprocessed_storage_path}")
     print(f"  Tail images: {INPUT_TAIL_PREFIX}/ (16 files)")
-    print(f"  Total: {len(image_urls)} images in alphabetical order")
+    print(f"  Total: {len(download_urls)} images in alphabetical order")
 
     # 2. Generate upload URL for output video
     output_filename = "action_00001.mp4"
@@ -114,7 +114,7 @@ def main():
     payload = {
         "input": {
             "workflow": workflow_json,
-            "image_urls": image_urls,
+            "download_urls": download_urls,
             "upload_urls": [
                 {
                     "name": output_filename,

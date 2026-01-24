@@ -104,7 +104,7 @@ def main():
     payload = {
         "input": {
             "workflow": workflow_json,
-            "image_urls": [
+            "download_urls": [
                 {
                     "name": "preprocessed.png",  # Must match the filename in workflow JSON
                     "url": input_url

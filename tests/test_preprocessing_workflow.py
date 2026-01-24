@@ -64,7 +64,7 @@ def main():
     payload = {
         "input": {
             "workflow": workflow_json,
-            "image_urls": [
+            "download_urls": [
                 {
                     "name": "original.png",
                     "url": input_url

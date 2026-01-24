@@ -10,30 +10,35 @@ import uuid
 import asyncio
 import time
 import os
+from state_manager import StateManager
 
 app = FastAPI(title="RunPod Local Orchestrator")
 redis_client = None
+state_manager = None
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize Redis connection on startup"""
-    global redis_client
+    global redis_client, state_manager
     redis_host = os.environ.get("REDIS_HOST", "localhost")
     redis_port = int(os.environ.get("REDIS_PORT", "6379"))
     redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+    state_manager = StateManager(redis_client)
     print(f"[API] Connected to Redis at {redis_host}:{redis_port}")
 
 
 def init_redis(host='localhost', port=6379):
     """Legacy function for manual initialization"""
-    global redis_client
+    global redis_client, state_manager
     redis_client = redis.Redis(host=host, port=port, decode_responses=True)
+    state_manager = StateManager(redis_client)
 
 
 class RunRequest(BaseModel):
     input: Dict[str, Any]
     webhook: Optional[str] = None
+    webhookv2: Optional[str] = None  # Support both webhook and webhookv2
 
 
 @app.get("/health")
@@ -86,21 +91,28 @@ async def health():
 async def run_async(request: RunRequest):
     job_id = str(uuid.uuid4())
     
+    # Use webhookv2 if provided, otherwise fall back to webhook
+    webhook_url = request.webhookv2 or request.webhook
+    
     job_data = {
         "id": job_id,
         "input": request.input,
-        "webhook": request.webhook,
+        "webhook": webhook_url,
         "created_at": time.time()
     }
     
+    # Store job data for webhook lookup
+    redis_client.set(f"runpod:job:{job_id}", json.dumps(job_data), ex=3600)
+    
+    # Queue the job
     redis_client.lpush("runpod:queue", json.dumps(job_data))
-    redis_client.set(
-        f"runpod:status:{job_id}",
-        json.dumps({
-            "status": "IN_QUEUE",
-            "created_at": job_data["created_at"]
-        }),
-        ex=3600
+    
+    # Set initial state using state manager
+    state_manager.transition_state(
+        job_id,
+        "IN_QUEUE",
+        metadata={"created_at": job_data["created_at"]},
+        webhook_url=webhook_url
     )
     
     print(f"[API] Queued job {job_id}")
@@ -115,20 +127,28 @@ async def run_async(request: RunRequest):
 async def run_sync(request: RunRequest):
     job_id = str(uuid.uuid4())
     
+    # Use webhookv2 if provided, otherwise fall back to webhook
+    webhook_url = request.webhookv2 or request.webhook
+    
     job_data = {
         "id": job_id,
         "input": request.input,
+        "webhook": webhook_url,
         "created_at": time.time()
     }
     
+    # Store job data for webhook lookup
+    redis_client.set(f"runpod:job:{job_id}", json.dumps(job_data), ex=3600)
+    
+    # Queue the job
     redis_client.lpush("runpod:queue", json.dumps(job_data))
-    redis_client.set(
-        f"runpod:status:{job_id}",
-        json.dumps({
-            "status": "IN_QUEUE",
-            "created_at": job_data["created_at"]
-        }),
-        ex=3600
+    
+    # Set initial state using state manager
+    state_manager.transition_state(
+        job_id,
+        "IN_QUEUE",
+        metadata={"created_at": job_data["created_at"]},
+        webhook_url=webhook_url
     )
     
     print(f"[API] Queued sync job {job_id}, waiting for result...")
@@ -149,7 +169,7 @@ async def run_sync(request: RunRequest):
                 "executionTime": int((status.get("completed_at", time.time()) - status.get("started_at", time.time())) * 1000),
                 "id": job_id,
                 "output": result_data,
-                "status": "COMPLETED"
+                "status": status.get("status", "COMPLETED")
             }
         await asyncio.sleep(1)
     
@@ -195,11 +215,8 @@ async def cancel_job(job_id: str):
     if not status_data:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     
-    redis_client.set(
-        f"runpod:status:{job_id}",
-        json.dumps({"status": "CANCELLED"}),
-        ex=3600
-    )
+    # Use state manager to transition to CANCELLED
+    state_manager.transition_state(job_id, "CANCELLED")
     
     print(f"[API] Cancelled job {job_id}")
     
@@ -248,16 +265,15 @@ async def get_job_for_worker(worker_id: str, job_in_progress: str = "0"):
             # Delete the job assignment so worker doesn't get it again
             redis_client.delete(f"runpod:worker:{worker_id}:job")
             
-            # Update status to IN_PROGRESS
-            redis_client.set(
-                f"runpod:status:{job_id}",
-                json.dumps({
-                    "status": "IN_PROGRESS",
+            # Update status to IN_PROGRESS using state manager
+            state_manager.transition_state(
+                job_id,
+                "IN_PROGRESS",
+                metadata={
                     "created_at": job.get("created_at", time.time()),
                     "started_at": time.time(),
                     "worker_id": worker_id
-                }),
-                ex=3600
+                }
             )
             
             print(f"[API] Worker {worker_id} picked up job {job_id}")
@@ -355,17 +371,16 @@ async def receive_result_from_worker(worker_id: str, request: Request, isStream:
         ex=3600
     )
     
-    # Update status to COMPLETED or FAILED
-    redis_client.set(
-        f"runpod:status:{job_id}",
-        json.dumps({
-            "status": final_status,
+    # Update status using state manager
+    state_manager.transition_state(
+        job_id,
+        final_status,
+        metadata={
             "created_at": status.get("created_at", completed_at),
             "started_at": status.get("started_at", completed_at),
             "completed_at": completed_at,
             "worker_id": worker_id
-        }),
-        ex=3600
+        }
     )
     
     print(f"[API] Worker {worker_id} completed job {job_id} with status: {final_status}")

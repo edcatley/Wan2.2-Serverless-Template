@@ -7,6 +7,7 @@ import json
 import time
 import os
 import threading
+from state_manager import StateManager
 
 
 class WorkerManager:
@@ -23,6 +24,8 @@ class WorkerManager:
         self.redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
         self.redis_client.ping()
         print(f"[Worker Manager] Connected to Redis at {redis_host}:{redis_port}")
+        
+        self.state_manager = StateManager(self.redis_client)
         
         self.models_path = os.environ.get("MODELS_PATH", "")
         print(f"[Worker Manager] Image: {self.image_name}, Max workers: {self.max_workers}")
@@ -66,16 +69,9 @@ class WorkerManager:
         
         print(f"[Worker {job_id}] Starting (active: {self.active_workers}/{self.max_workers})")
         
+        # Note: Don't set IN_PROGRESS here - the API does it when worker picks up the job
+        # We just need to track started_at for our own timeout logic
         started_at = time.time()
-        self.redis_client.set(
-            f"runpod:status:{job_id}",
-            json.dumps({
-                "status": "IN_PROGRESS",
-                "created_at": job.get("created_at", started_at),
-                "started_at": started_at
-            }),
-            ex=3600
-        )
         
         container = None
         try:
@@ -149,10 +145,21 @@ class WorkerManager:
                         # Check if result was posted before container died
                         result_data = self.redis_client.get(f"runpod:result:{job_id}")
                         if not result_data:
+                            # Set error result
                             self.redis_client.set(
                                 f"runpod:result:{job_id}",
                                 json.dumps({"error": f"Container stopped with status: {container.status}"}),
                                 ex=3600
+                            )
+                            # Transition to FAILED state
+                            self.state_manager.transition_state(
+                                job_id,
+                                "FAILED",
+                                metadata={
+                                    "created_at": job.get("created_at", started_at),
+                                    "started_at": started_at,
+                                    "completed_at": time.time()
+                                }
                             )
                         break
                 except Exception as e:
@@ -175,10 +182,23 @@ class WorkerManager:
             
             if not job_finished and elapsed >= timeout:
                 print(f"[Worker {job_id}] Job timed out after {timeout} seconds")
+                
+                # Set error result
                 self.redis_client.set(
                     f"runpod:result:{job_id}",
                     json.dumps({"error": f"Job timed out after {timeout} seconds"}),
                     ex=3600
+                )
+                
+                # Transition to TIMED_OUT state
+                self.state_manager.transition_state(
+                    job_id,
+                    "TIMED_OUT",
+                    metadata={
+                        "created_at": job.get("created_at", started_at),
+                        "started_at": started_at,
+                        "completed_at": time.time()
+                    }
                 )
             
             # Give worker a moment to finish any final operations
@@ -210,6 +230,16 @@ class WorkerManager:
                     json.dumps({"error": "Worker did not post result"}),
                     ex=3600
                 )
+                # Transition to FAILED state
+                self.state_manager.transition_state(
+                    job_id,
+                    "FAILED",
+                    metadata={
+                        "created_at": job.get("created_at", started_at),
+                        "started_at": started_at,
+                        "completed_at": time.time()
+                    }
+                )
             
             # Clean up container
             try:
@@ -222,10 +252,28 @@ class WorkerManager:
             error_msg = f"Docker image '{self.image_name}' not found"
             print(f"[Worker {job_id}] ERROR: {error_msg}")
             self.redis_client.set(f"runpod:result:{job_id}", json.dumps({"error": error_msg}), ex=3600)
+            self.state_manager.transition_state(
+                job_id,
+                "FAILED",
+                metadata={
+                    "created_at": job.get("created_at", time.time()),
+                    "started_at": time.time(),
+                    "completed_at": time.time()
+                }
+            )
         except Exception as e:
             error_msg = f"Failed to process job: {e}"
             print(f"[Worker {job_id}] ERROR: {error_msg}")
             self.redis_client.set(f"runpod:result:{job_id}", json.dumps({"error": error_msg}), ex=3600)
+            self.state_manager.transition_state(
+                job_id,
+                "FAILED",
+                metadata={
+                    "created_at": job.get("created_at", time.time()),
+                    "started_at": time.time(),
+                    "completed_at": time.time()
+                }
+            )
             
             if container:
                 try:
