@@ -66,7 +66,7 @@ def main():
             "workflow": workflow_json,
             "image_urls": [
                 {
-                    "name": "input.png",
+                    "name": "original.png",
                     "url": input_url
                 }
             ],

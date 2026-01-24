@@ -42,7 +42,7 @@ echo ========================================
 echo.
 
 REM Run the test
-python test_preprocessing_workflow.py
+python test_action_workflow.py
 
 echo.
 echo ========================================
