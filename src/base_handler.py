@@ -184,8 +184,16 @@ def validate_input(job_input):
     # Optional: API key for Comfy.org API Nodes, passed per-request
     comfy_org_api_key = job_input.get("comfy_org_api_key")
 
-    # Optional: Dictionary mapping filenames to signed upload URLs
-    upload_urls = job_input.get("upload_urls", {})
+    # Optional: Array of upload URL objects (consistent with image_urls/video_urls structure)
+    upload_urls = job_input.get("upload_urls")
+    if upload_urls is not None:
+        if not isinstance(upload_urls, list) or not all(
+            "name" in item and "url" in item for item in upload_urls
+        ):
+            return (
+                None,
+                "'upload_urls' must be a list of objects with 'name' and 'url' keys",
+            )
 
     # Optional: Output filename
     output_filename = job_input.get("output_filename")
@@ -800,6 +808,14 @@ def handler(job):
         # --------------------------------------------------------------------------
         print(f"worker-comfyui - Processing {len(outputs)} output nodes...")
 
+        # Build upload URL lookup map from array structure
+        upload_url_map = {}
+        if validated_data.get("upload_urls"):
+            upload_url_map = {
+                item["name"]: item["url"] 
+                for item in validated_data["upload_urls"]
+            }
+            print(f"worker-comfyui - Built upload URL map with {len(upload_url_map)} entries")
 
         for node_id, node_output in outputs.items():
             # Look for any potential file outputs from common keys
@@ -820,7 +836,7 @@ def handler(job):
 
                         if file_bytes:
                             # Check if we have a signed URL for this specific file
-                            upload_url = validated_data.get("upload_urls", {}).get(original_filename)
+                            upload_url = upload_url_map.get(original_filename)
                             
                             if upload_url:
                                 # Upload to signed URL

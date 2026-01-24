@@ -70,9 +70,12 @@ def main():
                     "url": input_url
                 }
             ],
-            "upload_urls": {
-                "preprocessed_00001_.png": output_url
-            }
+            "upload_urls": [
+                {
+                    "name": "preprocessed_00001_.png",
+                    "url": output_url
+                }
+            ]
         }
     }
 

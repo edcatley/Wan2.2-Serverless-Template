@@ -55,24 +55,33 @@ def main():
 
     # 2. Generate upload URLs for outputs
     # The workflow will generate multiple files with numbered suffixes
-    upload_urls = {}
+    upload_urls = []
     
     # Head images (assuming 16 frames based on test-data structure)
     for i in range(1, 17):
         filename = f"head_{i:05d}_.png"
         storage_path = f"{OUTPUT_HEAD_PREFIX}/{filename}"
-        upload_urls[filename] = generate_storage_url(storage_path, method="PUT", content_type="image/png")
+        upload_urls.append({
+            "name": filename,
+            "url": generate_storage_url(storage_path, method="PUT", content_type="image/png")
+        })
     
     # Tail images (assuming 16 frames)
     for i in range(1, 17):
         filename = f"tail_{i:05d}_.png"
         storage_path = f"{OUTPUT_TAIL_PREFIX}/{filename}"
-        upload_urls[filename] = generate_storage_url(storage_path, method="PUT", content_type="image/png")
+        upload_urls.append({
+            "name": filename,
+            "url": generate_storage_url(storage_path, method="PUT", content_type="image/png")
+        })
     
     # Video output
     video_filename = "neutral_00001.mp4"
     video_storage_path = f"{OUTPUT_VIDEO_PREFIX}/{video_filename}"
-    upload_urls[video_filename] = generate_storage_url(video_storage_path, method="PUT", content_type="video/mp4")
+    upload_urls.append({
+        "name": video_filename,
+        "url": generate_storage_url(video_storage_path, method="PUT", content_type="video/mp4")
+    })
     
     print(f"\nGenerated upload URLs for {len(upload_urls)} output files")
     print(f"  Head images: {OUTPUT_HEAD_PREFIX}/")

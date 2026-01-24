@@ -115,9 +115,12 @@ def main():
         "input": {
             "workflow": workflow_json,
             "image_urls": image_urls,
-            "upload_urls": {
-                output_filename: output_url
-            }
+            "upload_urls": [
+                {
+                    "name": output_filename,
+                    "url": output_url
+                }
+            ]
         }
     }
 
