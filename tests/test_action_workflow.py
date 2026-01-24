@@ -67,10 +67,10 @@ def main():
         })
     
     # Preprocessed image (will be 17th alphabetically)
-    preprocessed_storage_path = "test-data/output/preprocessed.png"
+    preprocessed_storage_path = "test-data/output/preprocessed_00001_.png"  # Actual filename in storage
     preprocessed_url = generate_storage_url(preprocessed_storage_path, method="GET")
     image_urls.append({
-        "name": "preprocessed.png",
+        "name": "preprocessed.png",  # Save as clean name in container
         "url": preprocessed_url
     })
     
