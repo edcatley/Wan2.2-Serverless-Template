@@ -38,7 +38,7 @@ def init_redis(host='localhost', port=6379):
 class RunRequest(BaseModel):
     input: Dict[str, Any]
     webhook: Optional[str] = None
-    webhookv2: Optional[str] = None  # Support both webhook and webhookv2
+    webhookV2: Optional[str] = None  # Support both webhook and webhookv2
 
 
 @app.get("/health")
@@ -92,7 +92,13 @@ async def run_async(request: RunRequest):
     job_id = str(uuid.uuid4())
     
     # Use webhookv2 if provided, otherwise fall back to webhook
-    webhook_url = request.webhookv2 or request.webhook
+    webhook_url = request.webhookV2 or request.webhook
+    
+    print(f"[API] ===== NEW JOB REQUEST (/run) =====")
+    print(f"[API] Job ID: {job_id}")
+    print(f"[API] Request webhook field: {request.webhook}")
+    print(f"[API] Request webhookv2 field: {request.webhookV2}")
+    print(f"[API] Final webhook URL: {webhook_url}")
     
     job_data = {
         "id": job_id,
@@ -101,8 +107,18 @@ async def run_async(request: RunRequest):
         "created_at": time.time()
     }
     
+    print(f"[API] Job data being stored: {json.dumps({k: v if k != 'input' else '...' for k, v in job_data.items()})}")
+    
     # Store job data for webhook lookup
     redis_client.set(f"runpod:job:{job_id}", json.dumps(job_data), ex=3600)
+    
+    # Verify it was stored
+    stored_data = redis_client.get(f"runpod:job:{job_id}")
+    if stored_data:
+        stored_job = json.loads(stored_data)
+        print(f"[API] Verified stored webhook: {stored_job.get('webhook')}")
+    else:
+        print(f"[API] ERROR: Failed to store job data in Redis!")
     
     # Queue the job
     redis_client.lpush("runpod:queue", json.dumps(job_data))
@@ -116,6 +132,7 @@ async def run_async(request: RunRequest):
     )
     
     print(f"[API] Queued job {job_id}")
+    print(f"[API] ===== END JOB REQUEST =====\n")
     
     return {
         "id": job_id,
@@ -128,7 +145,13 @@ async def run_sync(request: RunRequest):
     job_id = str(uuid.uuid4())
     
     # Use webhookv2 if provided, otherwise fall back to webhook
-    webhook_url = request.webhookv2 or request.webhook
+    webhook_url = request.webhookV2 or request.webhook
+    
+    print(f"[API] ===== NEW JOB REQUEST (/runsync) =====")
+    print(f"[API] Job ID: {job_id}")
+    print(f"[API] Request webhook field: {request.webhook}")
+    print(f"[API] Request webhookv2 field: {request.webhookV2}")
+    print(f"[API] Final webhook URL: {webhook_url}")
     
     job_data = {
         "id": job_id,
@@ -137,8 +160,18 @@ async def run_sync(request: RunRequest):
         "created_at": time.time()
     }
     
+    print(f"[API] Job data being stored: {json.dumps({k: v if k != 'input' else '...' for k, v in job_data.items()})}")
+    
     # Store job data for webhook lookup
     redis_client.set(f"runpod:job:{job_id}", json.dumps(job_data), ex=3600)
+    
+    # Verify it was stored
+    stored_data = redis_client.get(f"runpod:job:{job_id}")
+    if stored_data:
+        stored_job = json.loads(stored_data)
+        print(f"[API] Verified stored webhook: {stored_job.get('webhook')}")
+    else:
+        print(f"[API] ERROR: Failed to store job data in Redis!")
     
     # Queue the job
     redis_client.lpush("runpod:queue", json.dumps(job_data))
@@ -152,6 +185,7 @@ async def run_sync(request: RunRequest):
     )
     
     print(f"[API] Queued sync job {job_id}, waiting for result...")
+    print(f"[API] ===== END JOB REQUEST =====\n")
     
     # Wait for result (default 60 seconds, max 300)
     timeout = 300
