@@ -322,9 +322,11 @@ def download_and_upload_files(download_urls):
     """
     Download files from signed URLs and upload them to ComfyUI.
     File type (image/video) is auto-detected from filename extension.
+    Supports subdirectories via path separators in the name field.
 
     Args:
         download_urls (list): A list of dictionaries, each containing 'name' and 'url' keys.
+                             The 'name' can include subdirectories (e.g., "head/image.png")
 
     Returns:
         dict: A dictionary indicating success or error.
@@ -351,8 +353,18 @@ def download_and_upload_files(download_urls):
 
             print(f"worker-comfyui - Downloaded {name} ({len(file_bytes)} bytes), uploading to ComfyUI...")
 
+            # Parse subfolder and filename from name
+            # e.g., "head/image.png" -> subfolder="head", filename="image.png"
+            if "/" in name:
+                parts = name.rsplit("/", 1)
+                subfolder = parts[0]
+                filename = parts[1]
+            else:
+                subfolder = ""
+                filename = name
+
             # Auto-detect file type from extension
-            name_lower = name.lower()
+            name_lower = filename.lower()
             if name_lower.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
                 # Video file
                 endpoint = f"http://{COMFY_HOST}/upload/video"
@@ -364,11 +376,16 @@ def download_and_upload_files(download_urls):
                 content_type = "image/png"
                 form_field = "image"
 
-            # Prepare the form data
+            # Prepare the form data with subfolder support
             files = {
-                form_field: (name, BytesIO(file_bytes), content_type),
+                form_field: (filename, BytesIO(file_bytes), content_type),
                 "overwrite": (None, "true"),
             }
+            
+            # Add subfolder if present
+            if subfolder:
+                files["subfolder"] = (None, subfolder)
+                print(f"worker-comfyui - Uploading to subfolder: {subfolder}")
 
             # POST request to upload the file
             upload_response = requests.post(endpoint, files=files, timeout=60)
