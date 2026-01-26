@@ -10,7 +10,7 @@ ARG COMFYUI_VERSION=latest
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="8.9;9.0" \
+    TORCH_CUDA_ARCH_LIST="8.9;9.0,12.0" \
     CMAKE_BUILD_PARALLEL_LEVEL=8 \
     UV_HTTP_TIMEOUT=600
 
@@ -30,6 +30,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 
 # 5. INSTALL COMFY & PYTORCH
 RUN uv pip install comfy-cli pip setuptools wheel ninja
+RUN uv pip install --no-cache-dir sentencepiece protobuf transformers huggingface_hub
 RUN uv pip install --no-cache-dir torch torchvision --index-url ${PYTORCH_INDEX_URL}
 RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia
 
