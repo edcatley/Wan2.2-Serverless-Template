@@ -1,10 +1,10 @@
-# 1. SETUP THE BASE (CUDA 12.8)
-ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu24.04
+# 1. SETUP THE BASE (CUDA 12.9)
+ARG BASE_IMAGE=nvidia/cuda:12.9.0-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
-ARG COMFYUI_VERSION=latest
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129
+ARG COMFYUI_VERSION=v0.9.2
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
 ENV DEBIAN_FRONTEND=noninteractive \
