@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129
-ARG COMFYUI_VERSION=v0.9.2
+ARG COMFYUI_VERSION=latest
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
 ENV DEBIAN_FRONTEND=noninteractive \
