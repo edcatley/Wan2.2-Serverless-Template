@@ -1,0 +1,74 @@
+# CPU-only Dockerfile for local Mac testing
+# This builds a ComfyUI image that runs without NVIDIA GPU
+
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_PREFER_BINARY=1 \
+    PYTHONUNBUFFERED=1
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    git wget ffmpeg build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast package management
+RUN wget -qO- https://astral.sh/uv/install.sh | sh \
+    && ln -s /root/.local/bin/uv /usr/local/bin/uv
+
+# Create and activate virtual environment
+RUN uv venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+# Install pip (needed by comfy-cli internally) and CPU-only PyTorch
+RUN uv pip install pip setuptools wheel
+RUN uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Install ComfyUI CLI and ComfyUI itself (CPU mode)
+RUN uv pip install comfy-cli
+RUN yes | comfy --workspace /comfyui install --cpu
+
+WORKDIR /comfyui
+
+# Copy the config for model paths (even though we won't use models for mock tests)
+COPY src/extra_model_paths.yaml ./
+
+WORKDIR /
+
+# Install handler dependencies
+COPY requirements.txt .
+RUN uv pip install -r requirements.txt
+RUN uv pip install runpod  # RunPod serverless SDK
+
+# Install only the custom nodes needed for mock workflows
+# VHS (VideoHelperSuite) is the main one - handles image/video loading and saving
+ENV PIP_NO_INPUT=1
+WORKDIR /comfyui/custom_nodes
+
+# Clone VHS node (required for mock workflows)
+RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite && \
+    cd ComfyUI-VideoHelperSuite && \
+    uv pip install -r requirements.txt
+
+WORKDIR /
+
+# Copy handler code
+COPY src/ /src/
+COPY runpod/ /runpod/
+
+# Copy test data for mock workflows
+COPY test-data/ /comfyui/input/demo/
+
+# Create a startup script that launches ComfyUI then the handler
+RUN echo '#!/bin/bash\n\
+echo "worker-comfyui: Starting ComfyUI (CPU mode)"\n\
+python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen --cpu &\n\
+echo "worker-comfyui: Starting RunPod Handler"\n\
+python -u /runpod/handler.py\n\
+' > /start.sh && chmod +x /start.sh
+
+# Expose ComfyUI port
+EXPOSE 8188
+
+# Default: run the startup script
+CMD ["/start.sh"]

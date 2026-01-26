@@ -93,6 +93,9 @@ class WorkerManager:
                 "RUNPOD_AI_API_KEY": "local-test-key",
                 "RUNPOD_PING_INTERVAL": "60000",  # Heartbeat interval in ms
                 "RUNPOD_LOG_LEVEL": "DEBUG",  # DEBUG, INFO, WARN, ERROR
+                # Increased timeouts for Rosetta/CPU mode (ComfyUI takes longer to start)
+                "COMFY_API_AVAILABLE_MAX_RETRIES": "2400",  # 2400 * 50ms = 120 seconds
+                "COMFY_API_AVAILABLE_INTERVAL_MS": "100",   # Check every 100ms
             }
             
             volumes = {}
@@ -103,7 +106,8 @@ class WorkerManager:
             print(f"[Worker {job_id}] Starting container from {self.image_name}")
             
             # Try to use GPU if available
-            device_requests = []
+            device_requests = None  # None means don't request GPU at all
+            use_gpu = False
             try:
                 # Check if NVIDIA runtime is available
                 self.docker_client.containers.run(
@@ -113,19 +117,38 @@ class WorkerManager:
                     device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
                 )
                 device_requests = [docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
+                use_gpu = True
                 print(f"[Worker {job_id}] GPU support enabled")
             except Exception as e:
-                print(f"[Worker {job_id}] No GPU support available, running CPU-only: {e}")
+                print(f"[Worker {job_id}] No GPU support available, running CPU-only (Rosetta mode)")
             
-            container = self.docker_client.containers.run(
-                self.image_name,
-                environment=env_vars,
-                detach=True,
-                remove=False,
-                volumes=volumes,
-                mem_limit="8g",
-                device_requests=device_requests,
-            )
+            # Build container run kwargs
+            run_kwargs = {
+                "image": self.image_name,
+                "environment": env_vars,
+                "detach": True,
+                "remove": False,
+                "volumes": volumes if volumes else None,
+                "mem_limit": "8g",
+            }
+            
+            # Only add device_requests if GPU is available
+            if use_gpu and device_requests:
+                run_kwargs["device_requests"] = device_requests
+            
+            # For Mac/ARM with x86 images (like GHCR CUDA image), force Rosetta emulation
+            # Skip this for local CPU images which are built for ARM natively
+            import platform
+            is_arm_mac = platform.machine() == 'arm64' or platform.system() == 'Darwin'
+            is_remote_image = self.image_name.startswith('ghcr.io/') or 'cuda' in self.image_name.lower()
+            
+            if is_arm_mac and is_remote_image:
+                run_kwargs["platform"] = "linux/amd64"
+                print(f"[Worker {job_id}] Running with platform=linux/amd64 (Rosetta)")
+            else:
+                print(f"[Worker {job_id}] Running with native platform")
+            
+            container = self.docker_client.containers.run(**run_kwargs)
             
             print(f"[Worker {job_id}] Container {container.short_id} started, worker ID: {worker_id}")
             
@@ -205,6 +228,11 @@ class WorkerManager:
             if job_finished:
                 print(f"[Worker {job_id}] Waiting 2 seconds for final cleanup...")
                 time.sleep(2)
+            else:
+                # DEBUG: Keep container alive for inspection via Docker Desktop
+                print(f"[Worker {job_id}] Job failed - keeping container alive for 5 minutes for debugging...")
+                print(f"[Worker {job_id}] Check Docker Desktop logs, or run: docker logs <container_id>")
+                time.sleep(300)  # 5 minutes
             
             # Stop the container
             print(f"[Worker {job_id}] Stopping container...")
