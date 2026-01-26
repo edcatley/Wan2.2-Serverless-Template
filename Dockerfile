@@ -1,5 +1,5 @@
 # 1. SETUP THE BASE (CUDA 12.8)
-ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu22.04
+ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
