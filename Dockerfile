@@ -1,16 +1,16 @@
-# 1. SETUP THE BASE (CUDA 13)
-ARG BASE_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
+# 1. SETUP THE BASE (CUDA 12.8)
+ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu22.04
 FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG COMFYUI_VERSION=latest
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0" \
+    TORCH_CUDA_ARCH_LIST="8.9;9.0" \
     CMAKE_BUILD_PARALLEL_LEVEL=8 \
     UV_HTTP_TIMEOUT=600
 
