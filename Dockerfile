@@ -7,17 +7,21 @@ ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129
 ARG COMFYUI_VERSION=latest
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
+# FIXED: Removed '12.0' from ARCH_LIST (That is a cuda version, not an architecture). 
+# Added 10.0 for RTX 5090 (Blackwell).
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="8.9;9.0,12.0" \
+    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0" \
     CMAKE_BUILD_PARALLEL_LEVEL=8 \
     UV_HTTP_TIMEOUT=600
 
 # 3. INSTALL SYSTEM DEPS (Generic)
+# FIXED: Added libgl1, libglib2.0-0, etc from the OLD dockerfile so OpenCV works
 RUN apt-get update && apt-get install -y \
     python3.12 python3.12-venv python3.12-dev \
     git wget build-essential ninja-build ffmpeg \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
     && ln -sf /usr/bin/python3.12 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -30,8 +34,14 @@ ENV PATH="/opt/venv/bin:${PATH}"
 
 # 5. INSTALL COMFY & PYTORCH
 RUN uv pip install comfy-cli pip setuptools wheel ninja
-RUN uv pip install --no-cache-dir sentencepiece protobuf transformers huggingface_hub
+
+# REMOVED: The manual install of sentencepiece/transformers/protobuf. 
+# We let ComfyUI install the versions it actually wants.
+
+# Install PyTorch (This is fine to do manually to force the CUDA version)
 RUN uv pip install --no-cache-dir torch torchvision --index-url ${PYTORCH_INDEX_URL}
+
+# Install ComfyUI
 RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia
 
 WORKDIR /comfyui
