@@ -10,6 +10,7 @@ import websocket
 import uuid
 import socket
 import traceback
+import shutil
 
 # Time to wait between API check attempts in milliseconds
 COMFY_API_AVAILABLE_INTERVAL_MS = 50
@@ -583,6 +584,59 @@ def get_history(prompt_id):
     return response.json()
 
 
+def cleanup_comfyui_directories():
+    """
+    Clean up ComfyUI input/output/temp directories to prevent file collisions
+    between jobs when workers are reused.
+    
+    This removes all files from:
+    - /ComfyUI/input/ (uploaded input files) - EXCEPT /ComfyUI/input/demo/
+    - /ComfyUI/output/ (generated output files)  
+    - /ComfyUI/temp/ (temporary files)
+    
+    Models in /ComfyUI/models/ are NOT touched to keep them loaded in RAM.
+    Demo data in /ComfyUI/input/demo/ is preserved for testing.
+    """
+    directories_to_clean = [
+        "/ComfyUI/input",
+        "/ComfyUI/output",
+        "/ComfyUI/temp"
+    ]
+    
+    # Directories to preserve (don't delete)
+    preserve_dirs = ["/ComfyUI/input/demo"]
+    
+    cleaned_count = 0
+    
+    for directory in directories_to_clean:
+        if not os.path.exists(directory):
+            continue
+            
+        try:
+            # Remove all files in the directory
+            for item in os.listdir(directory):
+                item_path = os.path.join(directory, item)
+                
+                # Skip preserved directories
+                if item_path in preserve_dirs:
+                    continue
+                
+                try:
+                    if os.path.isfile(item_path):
+                        os.remove(item_path)
+                        cleaned_count += 1
+                    elif os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        cleaned_count += 1
+                except Exception as e:
+                    print(f"worker-comfyui - Warning: Could not remove {item_path}: {e}")
+        except Exception as e:
+            print(f"worker-comfyui - Warning: Could not access {directory}: {e}")
+    
+    if cleaned_count > 0:
+        print(f"worker-comfyui - Cleaned up {cleaned_count} item(s) from previous job")
+
+
 def get_image_data(filename, subfolder, image_type):
     """
     Fetch image bytes from the ComfyUI /view endpoint.
@@ -641,6 +695,9 @@ def handler(job):
     print(f"worker-comfyui - DEBUG: Workflow JSON: {json.dumps(workflow)}")
     input_images = validated_data.get("images")
     download_urls = validated_data.get("download_urls")
+
+    # Clean up ComfyUI directories from previous job to prevent file collisions
+    cleanup_comfyui_directories()
 
     # Make sure that the ComfyUI HTTP API is available before proceeding
     if not check_server(
