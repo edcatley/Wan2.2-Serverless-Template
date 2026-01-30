@@ -4,13 +4,20 @@
 TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1)"
 export LD_PRELOAD="${TCMALLOC}"
 
+# Suppress verbose logging from PyTorch and other libraries
+export TORCH_LOGS="-all"
+export TORCH_CPP_LOG_LEVEL="ERROR"
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export CUDA_LAUNCH_BLOCKING="0"
+export PYTHONWARNINGS="ignore"
+
 # Ensure ComfyUI-Manager runs in offline network mode inside the container
 comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
 
 echo "worker-comfyui: Starting ComfyUI"
 
-# Allow operators to tweak verbosity; default is DEBUG.
-: "${COMFY_LOG_LEVEL:=DEBUG}"
+# Allow operators to tweak verbosity; default is INFO (less verbose than DEBUG)
+: "${COMFY_LOG_LEVEL:=INFO}"
 
 # Serve the API and don't shutdown the container
 if [ "$SERVE_API_LOCALLY" == "true" ]; then

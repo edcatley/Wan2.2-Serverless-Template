@@ -802,7 +802,7 @@ def handler(job):
                 else:
                     continue
             except websocket.WebSocketTimeoutException:
-                print(f"worker-comfyui - Websocket receive timed out. Still waiting...")
+                # Timeout is normal during long-running operations, don't spam logs
                 continue
             except websocket.WebSocketConnectionClosedException as closed_err:
                 try:
