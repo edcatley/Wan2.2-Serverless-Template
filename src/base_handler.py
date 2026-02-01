@@ -597,44 +597,58 @@ def cleanup_comfyui_directories():
     Models in /ComfyUI/models/ are NOT touched to keep them loaded in RAM.
     Demo data in /ComfyUI/input/demo/ is preserved for testing.
     """
+    print("worker-comfyui - Starting cleanup of ComfyUI directories...")
+    
     directories_to_clean = [
-        "/ComfyUI/input",
-        "/ComfyUI/output",
-        "/ComfyUI/temp"
+        "/comfyui/input",
+        "/comfyui/output",
+        "/comfyui/temp"
     ]
     
     # Directories to preserve (don't delete)
-    preserve_dirs = ["/ComfyUI/input/demo"]
+    preserve_dirs = ["/comfyui/input/demo"]
     
     cleaned_count = 0
     
     for directory in directories_to_clean:
+        print(f"worker-comfyui - Checking directory: {directory}")
+        
         if not os.path.exists(directory):
+            print(f"worker-comfyui - Directory does not exist: {directory}")
             continue
-            
+        
         try:
+            items = os.listdir(directory)
+            print(f"worker-comfyui - Found {len(items)} item(s) in {directory}: {items}")
+            
             # Remove all files in the directory
-            for item in os.listdir(directory):
+            for item in items:
                 item_path = os.path.join(directory, item)
                 
                 # Skip preserved directories
                 if item_path in preserve_dirs:
+                    print(f"worker-comfyui - Skipping preserved directory: {item_path}")
                     continue
                 
                 try:
                     if os.path.isfile(item_path):
+                        print(f"worker-comfyui - Deleting file: {item_path}")
                         os.remove(item_path)
                         cleaned_count += 1
                     elif os.path.isdir(item_path):
+                        print(f"worker-comfyui - Deleting directory: {item_path}")
                         shutil.rmtree(item_path)
                         cleaned_count += 1
                 except Exception as e:
-                    print(f"worker-comfyui - Warning: Could not remove {item_path}: {e}")
+                    print(f"worker-comfyui - ERROR: Could not remove {item_path}: {e}")
+                    print(f"worker-comfyui - Exception type: {type(e).__name__}")
+                    traceback.print_exc()
         except Exception as e:
-            print(f"worker-comfyui - Warning: Could not access {directory}: {e}")
+            print(f"worker-comfyui - ERROR: Could not access {directory}: {e}")
+            print(f"worker-comfyui - Exception type: {type(e).__name__}")
+            traceback.print_exc()
     
-    if cleaned_count > 0:
-        print(f"worker-comfyui - Cleaned up {cleaned_count} item(s) from previous job")
+    print(f"worker-comfyui - Cleanup complete. Cleaned up {cleaned_count} item(s) from previous job")
 
 
 def get_image_data(filename, subfolder, image_type):
