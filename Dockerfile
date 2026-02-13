@@ -88,4 +88,4 @@ RUN comfy-node-install \
 EXPOSE 8188
 
 # 8. DEFAULT CMD (Just runs Comfy normally)
-CMD ["python", "main.py", "--listen", "0.0.0.0"]
+CMD ["python", "main.py", "--disable-metadata", "--listen", "0.0.0.0"]
