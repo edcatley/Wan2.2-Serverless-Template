@@ -11,3 +11,4 @@ generic_storage:
   vae: models/vae/
   unet: models/unet/
   seedvr2: models/SEEDVR2/
+  interpolation: models/interpolation/
