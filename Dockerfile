@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     python3.12 python3.12-venv python3.12-dev \
     git wget build-essential ninja-build ffmpeg \
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libgoogle-perftools4t64 \
     && ln -sf /usr/bin/python3.12 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*

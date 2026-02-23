@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# Use libtcmalloc for better memory management
+TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1)"
+export LD_PRELOAD="${TCMALLOC}"
+
+# Suppress verbose logging
+export TORCH_LOGS="-all"
+export TORCH_CPP_LOG_LEVEL="ERROR"
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export CUDA_LAUNCH_BLOCKING="0"
+export PYTHONWARNINGS="ignore"
+
+# Ensure ComfyUI-Manager runs in offline mode
+comfy-manager-set-mode offline || echo "worker-comfyui - Could not set ComfyUI-Manager network_mode" >&2
+
+: "${COMFY_LOG_LEVEL:=INFO}"
+
+echo "worker-comfyui - Starting ComfyUI..."
+python -u /comfyui/main.py \
+    --disable-auto-launch \
+    --disable-metadata \
+    --verbose "${COMFY_LOG_LEVEL}" \
+    --log-stdout &
+
+echo "worker-comfyui - Starting GKE Pub/Sub handler..."
+python -u /handler.py
