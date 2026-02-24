@@ -53,9 +53,9 @@ steps:
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
 
 substitutions:
-  _PROJECT_ID: YOUR_PROJECT_ID
-  _REGION: YOUR_REGION
-  _REPO: YOUR_REPO
+  _PROJECT_ID: project-lovegood
+  _REGION: europe-west1
+  _REPO: comfyui-gke
 
 options:
   machineType: 'E2_HIGHCPU_32'
