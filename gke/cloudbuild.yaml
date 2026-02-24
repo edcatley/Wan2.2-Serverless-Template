@@ -1,0 +1,66 @@
+steps:
+  # ==========================================================
+  # 1. BUILD BASE IMAGE
+  # ==========================================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-base
+    args:
+      - build
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-$SHORT_SHA'
+      - --cache-from
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
+      - --file
+      - Dockerfile
+      - .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-base
+    waitFor: ['build-base']
+    args:
+      - push
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
+
+  # ==========================================================
+  # 2. BUILD GKE ADAPTER
+  # ==========================================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-gke
+    waitFor: ['push-base']
+    args:
+      - build
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-latest'
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-$SHORT_SHA'
+      - --cache-from
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-latest'
+      - --build-arg
+      - 'BASE_IMAGE_NAME=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
+      - --file
+      - gke/Dockerfile
+      - .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-gke
+    waitFor: ['build-gke']
+    args:
+      - push
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
+
+substitutions:
+  _PROJECT_ID: YOUR_PROJECT_ID
+  _REGION: YOUR_REGION
+  _REPO: YOUR_REPO
+
+options:
+  machineType: 'E2_HIGHCPU_32'
+  # Large image builds need more disk
+  diskSizeGb: '200'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '7200s'
