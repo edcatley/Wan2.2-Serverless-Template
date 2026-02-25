@@ -1,9 +1,9 @@
-# 1. SETUP THE BASE (CUDA 13.0)
-ARG BASE_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
+# 1. SETUP THE BASE (CUDA 12.8)
+ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG COMFYUI_VERSION=latest
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
@@ -82,6 +82,7 @@ RUN comfy-node-install \
     seedvr2_videoupscaler \
     comfyui-frame-interpolation \
     tripleksampler \
+    comfy-gimm-vfi \
 	comfyui_essentials
 
 # 7. EXPOSE THE STANDARD PORT
