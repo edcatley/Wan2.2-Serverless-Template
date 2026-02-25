@@ -82,7 +82,6 @@ RUN comfy-node-install \
     seedvr2_videoupscaler \
     comfyui-frame-interpolation \
     tripleksampler \
-	comfy-gimm-vfi \
 	comfyui_essentials
 
 # 7. EXPOSE THE STANDARD PORT
