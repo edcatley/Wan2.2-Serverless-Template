@@ -58,7 +58,7 @@ substitutions:
   _REPO: comfyui-gke
 
 options:
-  machineType: 'E2_HIGHCPU_32'
+  machineType: 'e2-standard-2'
   # Large image builds need more disk
   diskSizeGb: '200'
   logging: CLOUD_LOGGING_ONLY
