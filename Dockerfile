@@ -80,10 +80,13 @@ RUN comfy-node-install \
     comfyui-custom-scripts \
     comfyui-wan-vace-prep \
     seedvr2_videoupscaler \
-    comfyui-frame-interpolation \
     tripleksampler \
     comfy-gimm-vfi \
 	comfyui_essentials
+
+# Install forked frame interpolation node (abandoned upstream, using fork)
+RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
+    && uv pip install --no-cache-dir -r /comfyui/custom_nodes/ComfyUI-Frame-Interpolation/requirements.txt
 
 # 7. EXPOSE THE STANDARD PORT
 EXPOSE 8188
