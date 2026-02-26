@@ -85,7 +85,8 @@ RUN comfy-node-install \
 	comfyui_essentials
 
 # Install forked frame interpolation node (abandoned upstream, using fork)
-RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
+RUN uv pip install --no-cache-dir setuptools \
+    && git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
     && uv pip install --no-cache-dir --no-build-isolation -r /comfyui/custom_nodes/ComfyUI-Frame-Interpolation/requirements-with-cupy.txt
 
 # 7. EXPOSE THE STANDARD PORT
