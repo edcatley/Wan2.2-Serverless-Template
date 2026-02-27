@@ -886,6 +886,9 @@ def handler(job):
             }
             print(f"worker-comfyui - Built upload URL map with {len(upload_url_map)} entries")
 
+        expected_uploads = set(upload_url_map.keys())
+        completed_uploads = set()
+
         for node_id, node_output in outputs.items():
             # Look for any potential file outputs from common keys
             for key in ["videos", "gifs", "images"]: 
@@ -926,6 +929,7 @@ def handler(job):
                                     response.raise_for_status()
                                     print(f"worker-comfyui - Successfully uploaded {original_filename} to signed URL")
                                     output_data.append({"filename": original_filename, "type": "uploaded", "url": upload_url})
+                                    completed_uploads.add(original_filename)
                                 except Exception as e:
                                     error_msg = f"Error uploading {original_filename} to signed URL: {e}"
                                     print(f"worker-comfyui - {error_msg}")
@@ -947,6 +951,17 @@ def handler(job):
         # --------------------------------------------------------------------------
         # ----------------- END OF MODIFIED OUTPUT PROCESSING BLOCK ----------------
         # --------------------------------------------------------------------------
+
+        # Check that every expected signed-URL upload was actually completed.
+        # This is a hard failure regardless of other outputs — return immediately
+        # so RunPod marks the job as failed rather than completed.
+        if expected_uploads:
+            missing_uploads = expected_uploads - completed_uploads
+            if missing_uploads:
+                missing_list = ", ".join(sorted(missing_uploads))
+                error_msg = f"Silent upload failure: the following files had signed URLs but were never uploaded: {missing_list}"
+                print(f"worker-comfyui - {error_msg}")
+                return {"error": error_msg}
     except websocket.WebSocketException as e:
         print(f"worker-comfyui - WebSocket Error: {e}")
         print(traceback.format_exc())
