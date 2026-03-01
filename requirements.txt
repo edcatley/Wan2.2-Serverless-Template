@@ -1,4 +1,3 @@
 websocket-client
 requests
 triton
-sageattention @ git+https://github.com/thu-ml/SageAttention.git@v2.2.0

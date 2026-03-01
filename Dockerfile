@@ -61,7 +61,8 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
 # Install Requirements (requests, websocket-client, triton, sageattention)
 COPY requirements.txt .
-RUN uv pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --no-cache-dir -r requirements.txt \
+    && uv pip install --no-cache-dir --no-build-isolation git+https://github.com/thu-ml/SageAttention.git@v2.2.0
 
 # Copy generic base handler (used by platform-specific wrappers)
 COPY src/ /src/
