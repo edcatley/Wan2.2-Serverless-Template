@@ -34,9 +34,6 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # 5. INSTALL COMFY & PYTORCH
 RUN uv pip install comfy-cli pip setuptools wheel ninja
 
-# REMOVED: The manual install of sentencepiece/transformers/protobuf. 
-# We let ComfyUI install the versions it actually wants.
-
 # Install PyTorch (This is fine to do manually to force the CUDA version)
 RUN uv pip install --no-cache-dir torch torchvision --index-url ${PYTORCH_INDEX_URL}
 
@@ -76,8 +73,7 @@ RUN comfy-node-install \
     comfyui-videohelpersuite \
     comfyui-kjnodes \
     comfyui-custom-scripts \
-    comfyui-wan-vace-prep \
-    seedvr2_videoupscaler
+    comfyui-wan-vace-prep 
 
 # Install forked frame interpolation node (abandoned upstream, using fork)
 RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
