@@ -61,8 +61,7 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
 # Install Requirements (requests, websocket-client, triton, sageattention)
 COPY requirements.txt .
-RUN uv pip install --no-cache-dir -r requirements.txt \
-    && uv pip install --no-cache-dir https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl
+RUN uv pip install --no-cache-dir -r requirements.txt
 
 # Copy generic base handler (used by platform-specific wrappers)
 COPY src/ /src/
