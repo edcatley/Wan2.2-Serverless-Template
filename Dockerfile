@@ -1,16 +1,16 @@
-# 1. SETUP THE BASE (CUDA 12.9)
-ARG BASE_IMAGE=nvidia/cuda:12.9.1-devel-ubuntu24.04
+# 1. SETUP THE BASE (CUDA 13.0)
+ARG BASE_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # 2. SETUP ARGS
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
 ARG COMFYUI_VERSION=latest
 
 # Added CMAKE_BUILD_PARALLEL_LEVEL back for faster compilation
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0,12.0" \
+    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;12.0;13.0" \
     CMAKE_BUILD_PARALLEL_LEVEL=8 \
     UV_HTTP_TIMEOUT=600
 
@@ -77,10 +77,7 @@ RUN comfy-node-install \
     comfyui-kjnodes \
     comfyui-custom-scripts \
     comfyui-wan-vace-prep \
-    seedvr2_videoupscaler \
-    tripleksampler \
-    comfy-gimm-vfi \
-	comfyui_essentials
+    seedvr2_videoupscaler
 
 # Install forked frame interpolation node (abandoned upstream, using fork)
 RUN uv pip install --no-cache-dir setuptools \
