@@ -62,7 +62,7 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Install Requirements (requests, websocket-client, triton, sageattention)
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt \
-    && uv pip install --no-cache-dir --no-build-isolation git+https://github.com/thu-ml/SageAttention.git@v2.2.0
+    && uv pip install --no-cache-dir https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl
 
 # Copy generic base handler (used by platform-specific wrappers)
 COPY src/ /src/
@@ -81,8 +81,7 @@ RUN comfy-node-install \
     seedvr2_videoupscaler
 
 # Install forked frame interpolation node (abandoned upstream, using fork)
-RUN uv pip install --no-cache-dir setuptools \
-    && git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
+RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
     && uv pip install --no-cache-dir --no-build-isolation -r /comfyui/custom_nodes/ComfyUI-Frame-Interpolation/requirements-with-cupy.txt
 
 # 7. EXPOSE THE STANDARD PORT
