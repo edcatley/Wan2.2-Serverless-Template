@@ -10,7 +10,7 @@ ARG COMFYUI_VERSION=latest
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_PREFER_BINARY=1 \
     PYTHONUNBUFFERED=1 \
-    TORCH_CUDA_ARCH_LIST="10.0" \
+    TORCH_CUDA_ARCH_LIST="12.0" \
     CMAKE_BUILD_PARALLEL_LEVEL=8 \
     UV_HTTP_TIMEOUT=600
 
@@ -60,7 +60,7 @@ COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt
 
 # Install SageAttention from source (must be after torch, requires --no-build-isolation)
-RUN MAX_JOBS=2 uv pip install --no-build-isolation git+https://github.com/thu-ml/SageAttention.git@v2.2.0
+RUN MAX_JOBS=2 CUDA_HOME=/usr/local/cuda uv pip install --no-build-isolation git+https://github.com/thu-ml/SageAttention.git@v2.2.0
 
 # Copy generic base handler (used by platform-specific wrappers)
 COPY src/ /src/
