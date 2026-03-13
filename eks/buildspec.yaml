@@ -1,0 +1,61 @@
+version: 0.2
+
+# AWS CodeBuild equivalent of gke/cloudbuild.yaml
+# Uses ECR instead of Artifact Registry.
+#
+# Required environment variables (set in CodeBuild project or pipeline):
+#   AWS_ACCOUNT_ID   - your AWS account ID
+#   AWS_REGION       - e.g. us-east-1
+#   ECR_REPO         - ECR repository name, e.g. wan2-comfyui
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      - IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+
+  build:
+    commands:
+      # ==========================================================
+      # 1. BUILD BASE IMAGE
+      # ==========================================================
+      - echo Building base image...
+      - |
+        docker build \
+          --tag $IMAGE_URI:base-latest \
+          --tag $IMAGE_URI:base-$COMMIT_HASH \
+          --cache-from $IMAGE_URI:base-latest \
+          --file Dockerfile \
+          .
+
+      - echo Pushing base image...
+      - docker push $IMAGE_URI:base-latest
+      - docker push $IMAGE_URI:base-$COMMIT_HASH
+
+      # ==========================================================
+      # 2. BUILD EKS ADAPTER
+      # ==========================================================
+      - echo Building EKS adapter image...
+      - |
+        docker build \
+          --tag $IMAGE_URI:eks-latest \
+          --tag $IMAGE_URI:eks-$COMMIT_HASH \
+          --cache-from $IMAGE_URI:eks-latest \
+          --build-arg BASE_IMAGE_NAME=$IMAGE_URI:base-latest \
+          --file eks/Dockerfile \
+          ./eks
+
+      - echo Pushing EKS adapter image...
+      - docker push $IMAGE_URI:eks-latest
+      - docker push $IMAGE_URI:eks-$COMMIT_HASH
+
+  post_build:
+    commands:
+      - echo Build completed.
+      - printf '[{"name":"wan2-comfyui","imageUri":"%s"}]' $IMAGE_URI:eks-$COMMIT_HASH > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
