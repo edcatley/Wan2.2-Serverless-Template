@@ -26,6 +26,12 @@ phases:
       - echo Pushing main image...
       - docker push $REPOSITORY_URI:latest
       - docker push $REPOSITORY_URI:$IMAGE_TAG
-
+      
+      - echo Installing SOCI CLI...
+      - wget https://github.com/awslabs/soci-snapshotter/releases/download/v0.5.0/soci-v0.5.0-linux-amd64.tar.gz
+      - tar -xvzf soci-v0.5.0-linux-amd64.tar.gz
+      - sudo mv soci soci-index-generator /usr/local/bin/
+      
       - echo Generating SOCI index...
-      - docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v ~/.aws:/root/.aws -e AWS_REGION=$AWS_REGION public.ecr.aws/aws-ec2/soci-index-generator:latest $REPOSITORY_URI:$IMAGE_TAG
+      - soci create $REPOSITORY_URI:$IMAGE_TAG
+      - soci push $REPOSITORY_URI:$IMAGE_TAG
