@@ -9,9 +9,17 @@ phases:
       - IMAGE_TAG=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d'/' -f2)
   build:
     commands:
-      - echo Build started from root context...
-      # We stay in the root, but tell docker to use the EKS-specific Dockerfile
-      - docker build -t $REPOSITORY_URI:latest -f eks/Dockerfile .
+      - echo Build started on `date`
+      
+      # 1. Build the "Generic" Base Image from the root Dockerfile
+      - echo Building the generic base image...
+      - docker build -t base-image -f Dockerfile .
+      
+      # 2. Build the EKS-specific image using the base-image we just made
+      - echo Building the EKS-specific image...
+      - docker build -t $REPOSITORY_URI:latest --build-arg BASE_IMAGE_NAME=base-image -f eks/Dockerfile .
+          
+      # 3. Tag it with the Git Tag (or 'manual')
       - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
   post_build:
     commands:
