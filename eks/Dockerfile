@@ -9,8 +9,8 @@ RUN uv pip install boto3 google-cloud-firestore
 RUN mkdir -p /network-volume
 
 # Copy EKS scripts
-COPY handler.py /handler.py
-COPY start.sh /start.sh
+COPY eks/handler.py /handler.py
+COPY eks/start.sh /start.sh
 
 RUN chmod +x /start.sh
 
