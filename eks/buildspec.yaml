@@ -27,11 +27,17 @@ phases:
       - docker push $REPOSITORY_URI:latest
       - docker push $REPOSITORY_URI:$IMAGE_TAG
       
-      - echo Installing SOCI CLI...
-      - wget https://github.com/awslabs/soci-snapshotter/releases/download/v0.5.0/soci-v0.5.0-linux-amd64.tar.gz
-      - tar -xvzf soci-v0.5.0-linux-amd64.tar.gz
-      - sudo mv soci soci-index-generator /usr/local/bin/
+      - echo Installing latest SOCI CLI...
+      # Use the GitHub API + jq to find the latest linux-amd64 download URL automatically
+      - export SOCI_URL=$(curl -s https://api.github.com/repos/awslabs/soci-snapshotter/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64.tar.gz")) | .browser_download_url')
+      - curl -L -o soci.tar.gz $SOCI_URL
+      - tar -xvzf soci.tar.gz
+      # The binary inside the tarball is named 'soci'
+      - cp soci /usr/local/bin/
       
-      - echo Generating SOCI index...
+      - echo Generating SOCI index for 25GB image...
+      # This scans the local docker image we just built
       - soci create $REPOSITORY_URI:$IMAGE_TAG
+      
+      - echo Pushing SOCI index to ECR...
       - soci push $REPOSITORY_URI:$IMAGE_TAG
