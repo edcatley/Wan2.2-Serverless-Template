@@ -4,37 +4,48 @@ phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
-      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      # Save the password to a variable so we can reuse it later for containerd/soci
+      - export REGISTRY_PASSWORD=$(aws ecr get-login-password --region $AWS_REGION)
+      - echo $REGISTRY_PASSWORD | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
       - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/animaitus-worker
       - IMAGE_TAG=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d'/' -f2)
+      
+      - echo Installing latest SOCI CLI...
+      - export SOCI_URL=$(curl -s https://api.github.com/repos/awslabs/soci-snapshotter/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64.tar.gz")) | .browser_download_url')
+      - curl -L -o soci.tar.gz $SOCI_URL
+      - tar -xvzf soci.tar.gz
+      - cp soci /usr/local/bin/
+      
   build:
     commands:
       - echo Build started on `date`
 
-      # 1. Build the "Generic" Base Image from the root Dockerfile
       - echo Building the generic base image...
       - docker build -t base-image -f Dockerfile .
 
-      # 2. Build the EKS-specific image using the base-image we just made
       - echo Building the EKS-specific image...
       - docker build -t $REPOSITORY_URI:latest --build-arg BASE_IMAGE_NAME=base-image -f eks/Dockerfile .
 
-      # 3. Tag it with the Git Tag (or 'manual')
       - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+      
   post_build:
     commands:
-      - echo Pushing main image...
+      - echo Pushing main image to ECR...
       - docker push $REPOSITORY_URI:latest
       - docker push $REPOSITORY_URI:$IMAGE_TAG
       
-      - echo Generating SOCI index using Registry Mode...
-      # We use the official AWS generator image (Correct URI: public.ecr.aws/soci-index-generator/soci-index-generator)
-      # We pass in your AWS credentials so it can talk to your ECR repo
-      - |
-        docker run --rm \
-          -e AWS_REGION=$AWS_REGION \
-          -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-          -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-          -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
-          public.ecr.aws/soci-index-generator/soci-index-generator:latest \
-          $REPOSITORY_URI:$IMAGE_TAG
+      - echo "Configuring containerd environment for CodeBuild..."
+      # 1. Tell ctr and soci where the hidden containerd socket is located
+      - export CONTAINERD_ADDRESS=/var/run/docker/containerd/containerd.sock
+      
+      - echo "Pulling the 25GB image directly into containerd from ECR..."
+      # 2. ctr requires explicit authentication flags (it ignores ~/.docker/config.json)
+      - ctr -a $CONTAINERD_ADDRESS image pull --user AWS:$REGISTRY_PASSWORD $REPOSITORY_URI:$IMAGE_TAG
+      
+      - echo "Generating SOCI index..."
+      # 3. Now that the image is in containerd, soci create will work perfectly
+      - soci create $REPOSITORY_URI:$IMAGE_TAG
+      
+      - echo "Pushing SOCI index to ECR..."
+      # 4. Push the resulting index back to ECR, again passing explicit credentials
+      - soci push --user AWS:$REGISTRY_PASSWORD $REPOSITORY_URI:$IMAGE_TAG
