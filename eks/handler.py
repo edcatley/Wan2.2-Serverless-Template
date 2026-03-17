@@ -2,24 +2,32 @@
 EKS-specific handler.
 
 Pulls jobs from an AWS SQS queue, runs them through the base ComfyUI
-handler, and writes results back to Google Cloud Firestore (so the
-Firebase app sees updates without any extra infrastructure).
+handler, and reports results via a per-job webhook URL.
 
 Required environment variables:
   AWS_REGION              - AWS region (e.g. us-east-1)
   SQS_QUEUE_URL           - SQS queue URL to poll for jobs
-  FIRESTORE_PROJECT_ID    - GCP project ID for Firestore
-  GOOGLE_APPLICATION_CREDENTIALS - Path to Firebase Admin SDK service account JSON
 
 Optional environment variables:
   WORKER_ID               - Identifier for this worker pod (defaults to hostname)
   VISIBILITY_TIMEOUT      - SQS visibility timeout in seconds (default: 1200)
   MAX_EMPTY_POLLS         - Consecutive empty polls before worker exits (default: 1)
+  CALLBACK_SECRET         - Bearer token sent in Authorization header for webhook auth (required)
 
 Message body fields:
-  id         - (required) Job ID, used as the Firestore document ID
-  collection - (required) Firestore collection to write status updates to
-  input      - (required) Job input payload (workflow, download_urls, etc.)
+  jobId       - (required) Job ID
+  webhookUrl  - (required) HTTPS endpoint to POST status updates to
+  input       - (required) Job input payload (workflow, download_urls, etc.)
+
+Webhook payload (POST to webhookUrl):
+  {
+    "jobId":    "<job_id>",
+    "status":   "IN_PROGRESS" | "COMPLETED" | "FAILED",
+    "workerId": "<worker_id>",
+    "output":   {...},          # present on COMPLETED
+    "error":    "...",          # present on FAILED
+    "details":  "..."           # present on FAILED
+  }
 """
 import json
 import os
@@ -30,8 +38,8 @@ import time
 import traceback
 
 import boto3
+import requests
 from botocore.exceptions import ClientError
-from google.cloud import firestore
 
 # Add root to path so we can import from src/
 sys.path.insert(0, "/")
@@ -43,60 +51,57 @@ from src.base_handler import handler
 
 AWS_REGION = os.environ["AWS_REGION"]
 SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
-FIRESTORE_PROJECT_ID = os.environ["FIRESTORE_PROJECT_ID"]
 WORKER_ID = os.environ.get("WORKER_ID", socket.gethostname())
 VISIBILITY_TIMEOUT = int(os.environ.get("VISIBILITY_TIMEOUT", 1200))
-# How many consecutive empty polls before the worker shuts itself down.
-# Each poll uses WaitTimeSeconds=20 (long polling), so the default of 1
-# means the pod exits after ~20 seconds of an empty queue.
 MAX_EMPTY_POLLS = int(os.environ.get("MAX_EMPTY_POLLS", 1))
+CALLBACK_SECRET = os.environ["CALLBACK_SECRET"]
 
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
 
 sqs = boto3.client("sqs", region_name=AWS_REGION)
-# Firestore authenticates via GOOGLE_APPLICATION_CREDENTIALS (service account JSON)
-db = firestore.Client(project=FIRESTORE_PROJECT_ID)
-
 
 # ---------------------------------------------------------------------------
-# Firestore helpers
+# Callback helper
 # ---------------------------------------------------------------------------
 
-def _set_job_status(collection: str, job_id: str, status: str, extra: dict = None):
-    """Write job status to Firestore."""
-    data = {"workerStatus": status, "workerId": WORKER_ID, "updatedAt": firestore.SERVER_TIMESTAMP}
+def _post_status(webhook_url: str, job_id: str, status: str, extra: dict = None):
+    """POST job status to the per-job webhook URL."""
+    payload = {"jobId": job_id, "status": status, "workerId": WORKER_ID}
     if extra:
-        data.update(extra)
-    db.collection(collection).document(job_id).set(data, merge=True)
+        payload.update(extra)
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CALLBACK_SECRET}"}
+
+    try:
+        resp = requests.post(webhook_url, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[eks-handler] WARNING: Webhook failed for job {job_id} (status={status}): {e}")
 
 
 # ---------------------------------------------------------------------------
 # Spot instance / SIGTERM handling
 # ---------------------------------------------------------------------------
 
-# Tracks the message currently being processed so the SIGTERM handler can
-# release it back to the queue immediately rather than waiting for the
-# visibility timeout to expire.
 _current_message = None
 
 def _handle_sigterm(signum, frame):
-    print(f"[eks-handler] SIGTERM received — spot instance being reclaimed.")
+    print("[eks-handler] SIGTERM received — spot instance being reclaimed.")
     if _current_message:
-        job_id = None
         try:
             payload = json.loads(_current_message["Body"])
-            job_id = payload.get("id")
-            collection = payload.get("collection")
+            job_id = payload.get("jobId")
+            webhook_url = payload.get("webhookUrl")
             sqs.change_message_visibility(
                 QueueUrl=SQS_QUEUE_URL,
                 ReceiptHandle=_current_message["ReceiptHandle"],
                 VisibilityTimeout=0,
             )
-            print(f"[eks-handler] Released message back to queue.")
-            if job_id and collection:
-                _set_job_status(collection, job_id, "QUEUED")
+            print("[eks-handler] Released message back to queue.")
+            if job_id and webhook_url:
+                _post_status(webhook_url, job_id, "QUEUED")
                 print(f"[eks-handler] Job {job_id} reset to QUEUED.")
         except Exception as e:
             print(f"[eks-handler] Error during SIGTERM cleanup: {e}")
@@ -110,23 +115,8 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # ---------------------------------------------------------------------------
 
 def _process_message(message: dict):
-    """
-    Called for each SQS message. Parses the job, runs it through
-    base_handler, and writes the result to Firestore.
-
-    Message body should be JSON with shape:
-      {
-        "id": "<job_id>",
-        "input": {
-          "workflow": {...},
-          "download_urls": [...],   # optional
-          "upload_urls": [...],     # optional
-          "images": [...]           # optional
-        }
-      }
-    """
     job_id = None
-    collection = None
+    webhook_url = None
     receipt_handle = message["ReceiptHandle"]
     aws_message_id = message["MessageId"]
 
@@ -138,15 +128,16 @@ def _process_message(message: dict):
             sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
             return
 
-        job_id = payload.get("id")
+        job_id = payload.get("jobId")
+        webhook_url = payload.get("webhookUrl")
+
         if not job_id:
-            print(f"[eks-handler] ERROR: Message {aws_message_id} missing 'id' field, deleting.")
+            print(f"[eks-handler] ERROR: Message {aws_message_id} missing 'jobId' field, deleting.")
             sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
             return
 
-        collection = payload.get("collection")
-        if not collection:
-            print(f"[eks-handler] ERROR: Message {aws_message_id} (job {job_id}) missing 'collection' field, deleting.")
+        if not webhook_url:
+            print(f"[eks-handler] ERROR: Message {aws_message_id} (job {job_id}) missing 'webhookUrl' field, deleting.")
             sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
             return
 
@@ -156,27 +147,28 @@ def _process_message(message: dict):
             return
 
         print(f"[eks-handler] Received job {job_id}")
-        _set_job_status(collection, job_id, "IN_PROGRESS")
+        _post_status(webhook_url, job_id, "IN_PROGRESS")
 
-        result = handler(payload)
+        # base_handler expects {"id": ..., "input": {...}}
+        result = handler({"id": job_id, "input": payload["input"]})
 
         if "error" in result:
             print(f"[eks-handler] Job {job_id} failed: {result['error']}")
-            _set_job_status(collection, job_id, "FAILED", {
+            _post_status(webhook_url, job_id, "FAILED", {
                 "error": result["error"],
                 "details": result.get("details"),
             })
         else:
             print(f"[eks-handler] Job {job_id} completed successfully.")
-            _set_job_status(collection, job_id, "COMPLETED")
+            _post_status(webhook_url, job_id, "COMPLETED", {"output": result})
 
         sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
 
     except Exception as e:
         print(f"[eks-handler] Unexpected error processing job {job_id}: {e}")
         traceback.print_exc()
-        if job_id and collection:
-            _set_job_status(collection, job_id, "FAILED", {"error": f"Unexpected worker error: {e}"})
+        if job_id and webhook_url:
+            _post_status(webhook_url, job_id, "FAILED", {"error": f"Unexpected worker error: {e}"})
         # Don't delete — let visibility timeout expire so SQS can redeliver or send to DLQ
 
 
@@ -214,7 +206,7 @@ if __name__ == "__main__":
                 _current_message = None
 
         except KeyboardInterrupt:
-            print(f"[eks-handler] Shutting down...")
+            print("[eks-handler] Shutting down...")
             break
         except ClientError as e:
             print(f"[eks-handler] SQS error: {e}")

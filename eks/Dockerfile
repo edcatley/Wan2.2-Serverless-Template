@@ -1,8 +1,8 @@
 ARG BASE_IMAGE_NAME
 FROM ${BASE_IMAGE_NAME}
 
-# Install EKS/AWS dependencies + Firestore for result reporting
-RUN uv pip install boto3 google-cloud-firestore
+# Install EKS/AWS dependencies
+RUN uv pip install boto3 requests
 
 # EKS mounts the network volume at /network-volume directly via a PersistentVolume,
 # so no symlink needed — just ensure the path exists as a mount point.
