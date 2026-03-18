@@ -20,7 +20,7 @@ echo ============================================================
 echo Building base image: comfyui-base:latest
 echo ============================================================
 echo.
-docker build -t comfyui-base:latest .
+docker build -t comfyui-base:latest ./base
 if errorlevel 1 (
     echo.
     echo [ERROR] Failed to build base image

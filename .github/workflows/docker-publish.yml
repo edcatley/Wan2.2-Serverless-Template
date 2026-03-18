@@ -75,8 +75,8 @@ jobs:
       - name: Build and push (BASE)
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: Dockerfile
+          context: ./base
+          file: base/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-base.outputs.tags }}
 
@@ -102,9 +102,10 @@ jobs:
           file: ./runpod/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-runpod.outputs.tags }}
-          # This will now use the lowercase name correctly
           build-args: |
             BASE_IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:base-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # ==========================================================
       # 3. RELEASE NOTES

@@ -44,6 +44,7 @@ WORKDIR /comfyui
 # Copy the config telling Comfy to look at /network-volume
 COPY src/extra_model_paths.yaml ./
 
+
 WORKDIR /
 
 # 6. SCRIPTS & CUSTOM NODES

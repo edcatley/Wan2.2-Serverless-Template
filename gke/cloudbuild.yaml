@@ -13,8 +13,8 @@ steps:
       - --cache-from
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
       - --file
-      - Dockerfile
-      - .
+      - base/Dockerfile
+      - ./base
 
   - name: 'gcr.io/cloud-builders/docker'
     id: push-base

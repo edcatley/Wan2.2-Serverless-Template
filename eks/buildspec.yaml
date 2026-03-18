@@ -20,11 +20,17 @@ phases:
     commands:
       - echo Build started on `date`
 
+      - echo Pulling base image cache...
+      - docker pull $REPOSITORY_URI:base-latest || true
+
       - echo Building the generic base image...
-      - docker build -t base-image -f Dockerfile .
+      - docker build --cache-from $REPOSITORY_URI:base-latest -t base-image -t $REPOSITORY_URI:base-latest -f base/Dockerfile ./base
+
+      - echo Pulling EKS image cache...
+      - docker pull $REPOSITORY_URI:eks-latest || true
 
       - echo Building the EKS-specific image...
-      - docker build -t $REPOSITORY_URI:latest --build-arg BASE_IMAGE_NAME=base-image -f eks/Dockerfile .
+      - docker build --cache-from $REPOSITORY_URI:eks-latest -t $REPOSITORY_URI:latest -t $REPOSITORY_URI:eks-latest --build-arg BASE_IMAGE_NAME=base-image -f eks/Dockerfile .
 
       - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
       
@@ -33,6 +39,10 @@ phases:
       - echo Pushing main image to ECR...
       - docker push $REPOSITORY_URI:latest
       - docker push $REPOSITORY_URI:$IMAGE_TAG
+
+      - echo Pushing cache images to ECR...
+      - docker push $REPOSITORY_URI:base-latest
+      - docker push $REPOSITORY_URI:eks-latest
       
       - echo "Configuring containerd environment for CodeBuild..."
       # 1. Tell ctr and soci where the hidden containerd socket is located

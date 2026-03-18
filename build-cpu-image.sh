@@ -5,7 +5,7 @@ echo "============================================================"
 echo ""
 
 # Build the image
-docker build -f Dockerfile.cpu -t runpod-comfyui-cpu:latest .
+docker build -f base/Dockerfile.cpu -t runpod-comfyui-cpu:latest ./base
 
 if [ $? -eq 0 ]; then
     echo ""

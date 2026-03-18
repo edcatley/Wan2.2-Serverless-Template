@@ -1,150 +1,211 @@
-"""
-GKE-specific handler.
-
-Pulls jobs from a Google Cloud Pub/Sub subscription, runs them through
-the base ComfyUI handler, and writes results back to Firestore.
-
-Required environment variables:
-  PUBSUB_PROJECT_ID       - GCP project ID
-  PUBSUB_SUBSCRIPTION     - Pub/Sub subscription name to pull jobs from
-  FIRESTORE_COLLECTION    - Firestore collection to write job results to (default: "jobs")
-
-Optional environment variables:
-  WORKER_ID               - Identifier for this worker pod (defaults to hostname)
-  MAX_OUTSTANDING_MESSAGES - Max messages to hold in flight (default: 1, since ComfyUI is single-threaded)
-"""
 import json
 import os
+import signal
 import socket
 import sys
 import time
+import threading
 import traceback
-
-from google.cloud import firestore, pubsub_v1
-
-# Add root to path so we can import from src/
-sys.path.insert(0, "/")
-from src.base_handler import handler
+import requests
+from google.cloud import pubsub_v1
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-
 PROJECT_ID = os.environ["PUBSUB_PROJECT_ID"]
 SUBSCRIPTION = os.environ["PUBSUB_SUBSCRIPTION"]
-FIRESTORE_COLLECTION = os.environ.get("FIRESTORE_COLLECTION", "jobs")
+CALLBACK_SECRET = os.environ["CALLBACK_SECRET"]
 WORKER_ID = os.environ.get("WORKER_ID", socket.gethostname())
 
-# ComfyUI is single-threaded, so we only process one job at a time
-MAX_OUTSTANDING_MESSAGES = int(os.environ.get("MAX_OUTSTANDING_MESSAGES", 1))
+# Add root to path for local imports
+sys.path.insert(0, "/")
+from src.base_handler import handler
 
-# ---------------------------------------------------------------------------
-# Clients
-# ---------------------------------------------------------------------------
-
-db = firestore.Client(project=PROJECT_ID)
+# Initialize Pub/Sub
 subscriber = pubsub_v1.SubscriberClient()
 subscription_path = subscriber.subscription_path(PROJECT_ID, SUBSCRIPTION)
 
+# Global tracker for the job currently in progress
+_current_wrapped_message = None
+_current_job_id = None
+_current_webhook_url = None
 
 # ---------------------------------------------------------------------------
-# Firestore helpers
+# Message Wrapper
 # ---------------------------------------------------------------------------
+class PubSubMessageWrapper:
+    """
+    Makes a Synchronous Pull message behave like a Streaming message.
+    This allows us to use .ack() and .nack() inside our processing logic.
+    """
+    def __init__(self, received_msg):
+        self.data = received_msg.message.data
+        self.ack_id = received_msg.ack_id
 
-def _set_job_status(job_id: str, status: str, extra: dict = None):
-    """Write job status to Firestore."""
-    data = {"status": status, "worker_id": WORKER_ID, "updated_at": firestore.SERVER_TIMESTAMP}
+    def ack(self):
+        subscriber.acknowledge(
+            request={"subscription": subscription_path, "ack_ids": [self.ack_id]}
+        )
+
+    def nack(self):
+        # Setting deadline to 0 makes the message immediately available to others
+        subscriber.modify_ack_deadline(
+            request={
+                "subscription": subscription_path, 
+                "ack_ids": [self.ack_id], 
+                "ack_deadline_seconds": 0
+            }
+        )
+
+# ---------------------------------------------------------------------------
+# Lease Extender
+# ---------------------------------------------------------------------------
+class LeaseExtender(threading.Thread):
+    """Background thread to keep the Pub/Sub lease alive during long renders."""
+    def __init__(self, wrapper):
+        super().__init__(daemon=True)
+        self.wrapper = wrapper
+        self.stop_event = threading.Event()
+
+    def run(self):
+        print(f"[gke-handler] Lease heartbeat started.")
+        while not self.stop_event.is_set():
+            self.stop_event.wait(60)
+            if self.stop_event.is_set():
+                break
+            try:
+                subscriber.modify_ack_deadline(
+                    request={
+                        "subscription": subscription_path,
+                        "ack_ids": [self.wrapper.ack_id],
+                        "ack_deadline_seconds": 600,
+                    }
+                )
+            except Exception as e:
+                print(f"[gke-handler] Heartbeat failed: {e}")
+
+    def stop(self):
+        self.stop_event.set()
+
+
+# ---------------------------------------------------------------------------
+# Webhook Helper
+# ---------------------------------------------------------------------------
+def _post_status(webhook_url: str, job_id: str, status: str, extra: dict = None):
+    payload = {"jobId": job_id, "status": status, "workerId": WORKER_ID}
     if extra:
-        data.update(extra)
-    db.collection(FIRESTORE_COLLECTION).document(job_id).set(data, merge=True)
+        payload.update(extra)
 
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {CALLBACK_SECRET}"
+    }
 
-# ---------------------------------------------------------------------------
-# Message handler
-# ---------------------------------------------------------------------------
-
-def _process_message(message: pubsub_v1.types.PubsubMessage):
-    """
-    Called for each Pub/Sub message. Parses the job, runs it through
-    base_handler, and writes the result to Firestore.
-
-    Message data should be JSON with shape:
-      {
-        "id": "<job_id>",
-        "input": {
-          "workflow": {...},
-          "download_urls": [...],   # optional
-          "upload_urls": [...],     # optional
-          "images": [...]           # optional
-        }
-      }
-    """
-    job_id = None
     try:
-        payload = json.loads(message.data.decode("utf-8"))
-        job_id = payload.get("id")
+        resp = requests.post(webhook_url, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[gke-handler] WARNING: Webhook failed for {job_id}: {e}")
 
-        if not job_id:
-            print(f"[gke-handler] ERROR: Message missing 'id' field, nacking.")
-            message.nack()
+# ---------------------------------------------------------------------------
+# SIGTERM (Spot Reclaim) Handling
+# ---------------------------------------------------------------------------
+def _handle_sigterm(signum, frame):
+    """If Google takes the Blackwell back, return the job to the queue."""
+    global _current_wrapped_message, _current_job_id, _current_webhook_url
+    print("[gke-handler] SIGTERM received. Reclaiming node...")
+    if _current_wrapped_message:
+        print(f"[gke-handler] Nacking current job to ensure redelivery.")
+        _current_wrapped_message.nack()
+        if _current_job_id and _current_webhook_url:
+            _post_status(_current_webhook_url, _current_job_id, "QUEUED")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
+
+# ---------------------------------------------------------------------------
+# The Processing Logic
+# ---------------------------------------------------------------------------
+def _process_job(wrapped_message):
+    global _current_job_id, _current_webhook_url
+    job_id = None
+    webhook_url = None
+    
+    try:
+        payload = json.loads(wrapped_message.data.decode("utf-8"))
+        job_id = payload.get("jobId")
+        webhook_url = payload.get("webhookUrl")
+        job_input = payload.get("input")
+
+        if not all([job_id, webhook_url, job_input]):
+            print(f"[gke-handler] ERROR: Malformed message. Discarding.")
+            wrapped_message.ack()
             return
 
-        print(f"[gke-handler] Received job {job_id}")
-        _set_job_status(job_id, "IN_PROGRESS", {"started_at": firestore.SERVER_TIMESTAMP})
+        _current_job_id = job_id
+        _current_webhook_url = webhook_url
 
-        # Run through the base handler — same interface as RunPod
-        result = handler(payload)
+        print(f"[gke-handler] Starting job {job_id}")
+        _post_status(webhook_url, job_id, "IN_PROGRESS")
 
-        if "error" in result:
-            print(f"[gke-handler] Job {job_id} failed: {result['error']}")
-            _set_job_status(job_id, "FAILED", {
-                "error": result["error"],
-                "details": result.get("details"),
-                "completed_at": firestore.SERVER_TIMESTAMP,
-            })
-        else:
-            print(f"[gke-handler] Job {job_id} completed successfully.")
-            _set_job_status(job_id, "COMPLETED", {
-                "output": result,
-                "completed_at": firestore.SERVER_TIMESTAMP,
-            })
+        heartbeat = LeaseExtender(wrapped_message)
+        heartbeat.start()
 
-        message.ack()
+        try:
+            # Call the ComfyUI handler
+            result = handler({"id": job_id, "input": job_input})
+
+            if "error" in result:
+                _post_status(webhook_url, job_id, "FAILED", {
+                    "error": result["error"],
+                    "details": result.get("details"),
+                })
+            else:
+                _post_status(webhook_url, job_id, "COMPLETED", {"output": result})
+
+            wrapped_message.ack()
+            print(f"[gke-handler] Job {job_id} finished.")
+        finally:
+            heartbeat.stop()
+            heartbeat.join()
 
     except Exception as e:
-        print(f"[gke-handler] Unexpected error processing job {job_id}: {e}")
-        traceback.print_exc()
-        if job_id:
-            _set_job_status(job_id, "FAILED", {
-                "error": f"Unexpected worker error: {e}",
-                "completed_at": firestore.SERVER_TIMESTAMP,
-            })
-        # Nack so Pub/Sub can redeliver or send to dead-letter topic
-        message.nack()
-
+        print(f"[gke-handler] Unexpected error: {e}")
+        wrapped_message.nack()
+    finally:
+        _current_job_id = None
+        _current_webhook_url = None
 
 # ---------------------------------------------------------------------------
-# Main loop
+# Main Loop (The Pull Engine)
 # ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    print(f"[gke-handler] Worker {WORKER_ID} starting...")
-    print(f"[gke-handler] Subscribing to {subscription_path}")
+    print(f"[gke-handler] Blackwell Worker {WORKER_ID} online.")
+    
+    while True:
+        try:
+            # Synchronous pull 1 message
+            response = subscriber.pull(
+                request={"subscription": subscription_path, "max_messages": 1},
+                timeout=20
+            )
 
-    flow_control = pubsub_v1.types.FlowControl(max_messages=MAX_OUTSTANDING_MESSAGES)
+            # --- EXIT CONDITION ---
+            if not response.received_messages:
+                print("[gke-handler] Queue empty. Shutting down Blackwell.")
+                break 
 
-    streaming_pull = subscriber.subscribe(
-        subscription_path,
-        callback=_process_message,
-        flow_control=flow_control,
-    )
+            for msg in response.received_messages:
+                wrapped = PubSubMessageWrapper(msg)
+                _current_wrapped_message = wrapped
+                _process_job(wrapped)
+                _current_wrapped_message = None
 
-    print(f"[gke-handler] Listening for jobs...")
+        except Exception as e:
+            # Handle timeouts or network blips
+            if "DeadlineExceeded" not in str(e):
+                print(f"[gke-handler] Loop error: {e}")
+            time.sleep(2)
 
-    try:
-        # Block forever — the subscriber runs callbacks on background threads
-        streaming_pull.result()
-    except KeyboardInterrupt:
-        print(f"[gke-handler] Shutting down...")
-        streaming_pull.cancel()
-        streaming_pull.result()
+    print("[gke-handler] Process exited naturally. Billing stopped.")
+    sys.exit(0)
