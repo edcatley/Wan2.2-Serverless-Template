@@ -9,13 +9,13 @@ steps:
       - -c
       - |
         git fetch --tags
-        PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
-        if [ -z "$PREV_TAG" ]; then
+        PREV_TAG=$$(git tag --sort=-version:refname | sed -n '2p')
+        if [ -z "$$PREV_TAG" ]; then
           echo "No previous tag found - building base"
           echo "BUILD_BASE=true" > /workspace/build_flags
         else
-          BASE_CHANGED=$(git diff --name-only $PREV_TAG HEAD -- base/ | wc -l)
-          if [ "$BASE_CHANGED" -gt 0 ]; then
+          BASE_CHANGED=$$(git diff --name-only $$PREV_TAG HEAD -- base/ | wc -l)
+          if [ "$$BASE_CHANGED" -gt 0 ]; then
             echo "Changes detected in base/ - building base"
             echo "BUILD_BASE=true" > /workspace/build_flags
           else
@@ -36,7 +36,7 @@ steps:
       - -c
       - |
         source /workspace/build_flags
-        if [ "$BUILD_BASE" = "true" ]; then
+        if [ "$$BUILD_BASE" = "true" ]; then
           docker build \
             --tag ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest \
             --tag ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-$SHORT_SHA \
@@ -54,7 +54,7 @@ steps:
       - -c
       - |
         source /workspace/build_flags
-        if [ "$BUILD_BASE" = "true" ]; then
+        if [ "$$BUILD_BASE" = "true" ]; then
           docker push --all-tags ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui
         else
           echo "Skipping base push"
