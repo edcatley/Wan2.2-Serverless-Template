@@ -37,16 +37,6 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changed paths
-        uses: dorny/paths-filter@v3
-        id: changes
-        with:
-          filters: |
-            base:
-              - 'base/**'
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
@@ -66,11 +56,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # ==========================================================
-      # 1. BUILD BASE (only when base/ changed)
+      # 1. BUILD BASE (The Golden Image)
       # ==========================================================
       - name: Extract metadata (BASE)
         id: meta-base
-        if: steps.changes.outputs.base == 'true'
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -79,7 +68,6 @@ jobs:
             type=ref,event=tag,suffix=-base
 
       - name: Build and push (BASE)
-        if: steps.changes.outputs.base == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./base
@@ -90,7 +78,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ==========================================================
-      # 2. BUILD RUNPOD ADAPTER (always)
+      # 2. BUILD RUNPOD ADAPTER
       # ==========================================================
       - name: Extract metadata (RUNPOD)
         id: meta-runpod

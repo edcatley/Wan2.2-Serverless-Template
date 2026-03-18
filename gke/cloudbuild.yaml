@@ -1,64 +1,28 @@
 steps:
   # ==========================================================
-  # 0. DETECT WHAT CHANGED
-  # ==========================================================
-  - name: 'gcr.io/cloud-builders/git'
-    id: detect-changes
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        git fetch --tags
-        PREV_TAG=$$(git tag --sort=-version:refname | sed -n '2p')
-        if [ -z "$$PREV_TAG" ]; then
-          echo "No previous tag found - building base"
-          echo "BUILD_BASE=true" > /workspace/build_flags
-        else
-          BASE_CHANGED=$$(git diff --name-only $$PREV_TAG HEAD -- base/ | wc -l)
-          if [ "$$BASE_CHANGED" -gt 0 ]; then
-            echo "Changes detected in base/ - building base"
-            echo "BUILD_BASE=true" > /workspace/build_flags
-          else
-            echo "No changes in base/ - skipping base build"
-            echo "BUILD_BASE=false" > /workspace/build_flags
-          fi
-        fi
-        cat /workspace/build_flags
-
-  # ==========================================================
-  # 1. BUILD BASE IMAGE (conditional)
+  # 1. BUILD BASE IMAGE
   # ==========================================================
   - name: 'gcr.io/cloud-builders/docker'
     id: build-base
-    waitFor: ['detect-changes']
-    entrypoint: bash
     args:
-      - -c
-      - |
-        source /workspace/build_flags
-        if [ "$$BUILD_BASE" = "true" ]; then
-          docker build \
-            --tag ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest \
-            --tag ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-$SHORT_SHA \
-            --cache-from ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest \
-            --file base/Dockerfile ./base
-        else
-          echo "Skipping base build"
-        fi
+      - build
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-$SHORT_SHA'
+      - --cache-from
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:base-latest'
+      - --file
+      - base/Dockerfile
+      - ./base
 
   - name: 'gcr.io/cloud-builders/docker'
     id: push-base
     waitFor: ['build-base']
-    entrypoint: bash
     args:
-      - -c
-      - |
-        source /workspace/build_flags
-        if [ "$$BUILD_BASE" = "true" ]; then
-          docker push --all-tags ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui
-        else
-          echo "Skipping base push"
-        fi
+      - push
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
 
   # ==========================================================
   # 2. BUILD GKE ADAPTER
@@ -89,9 +53,9 @@ steps:
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
 
 substitutions:
-  _PROJECT_ID: project-lovegood
-  _REGION: europe-west1
-  _REPO: comfyui-gke
+  _PROJECT_ID: animaitus
+  _REGION: europe-west4
+  _REPO: animaitus-repo
 
 options:
   logging: CLOUD_LOGGING_ONLY
