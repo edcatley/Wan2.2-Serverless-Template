@@ -9,8 +9,8 @@ RUN uv pip install google-cloud-pubsub
 RUN mkdir -p /network-volume
 
 # Copy GKE scripts
-COPY gke/handler.py /handler.py
-COPY gke/start.sh /start.sh
+COPY handler.py /handler.py
+COPY start.sh /start.sh
 
 RUN chmod +x /start.sh
 
