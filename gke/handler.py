@@ -7,15 +7,20 @@ import time
 import threading
 import traceback
 import requests
-from google.cloud import pubsub_v1
+from google.cloud import pubsub_v1, secretmanager
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 PROJECT_ID = os.environ["PUBSUB_PROJECT_ID"]
 SUBSCRIPTION = os.environ["PUBSUB_SUBSCRIPTION"]
-CALLBACK_SECRET = os.environ["CALLBACK_SECRET"]
 WORKER_ID = os.environ.get("WORKER_ID", socket.gethostname())
+
+def _get_secret(secret_id: str) -> str:
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
 
 # Add root to path for local imports
 sys.path.insert(0, "/")
@@ -98,7 +103,7 @@ def _post_status(webhook_url: str, job_id: str, status: str, extra: dict = None)
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {CALLBACK_SECRET}"
+        "Authorization": f"Bearer {_get_secret('worker-callback-secret')}"
     }
 
     try:

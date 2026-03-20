@@ -2,7 +2,7 @@ ARG BASE_IMAGE_NAME
 FROM ${BASE_IMAGE_NAME}
 
 # Install GKE/GCP dependencies
-RUN uv pip install google-cloud-pubsub
+RUN uv pip install google-cloud-pubsub google-cloud-secret-manager
 
 # GKE mounts the network volume at /network-volume directly via a PersistentVolume,
 # so no symlink needed — just ensure the path exists as a mount point.
