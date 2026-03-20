@@ -103,7 +103,7 @@ def _post_status(webhook_url: str, job_id: str, status: str, extra: dict = None)
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {_get_secret('worker-callback-secret')}"
+        "Authorization": f"Bearer {_get_secret('WORKER_WEBHOOK_SECRET')}"
     }
 
     try:
