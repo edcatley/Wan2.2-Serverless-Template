@@ -6,6 +6,7 @@ import os
 import requests
 import base64
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import websocket
 import uuid
 import socket
@@ -338,75 +339,75 @@ def download_and_upload_files(download_urls):
     responses = []
     download_errors = []
 
-    print(f"worker-comfyui - Downloading and uploading {len(download_urls)} file(s) from URLs...")
+    print(f"worker-comfyui - Downloading and uploading {len(download_urls)} file(s) from URLs (parallel)...")
 
-    for file_item in download_urls:
-        try:
-            name = file_item["name"]
-            url = file_item["url"]
+    def _download_and_upload_one(file_item):
+        name = file_item["name"]
+        url = file_item["url"]
 
-            print(f"worker-comfyui - Downloading {name} from {url[:100]}...")
-            
-            # Download the file from the signed URL
-            response = requests.get(url, timeout=120)
-            response.raise_for_status()
-            file_bytes = response.content
+        print(f"worker-comfyui - Downloading {name} from {url[:100]}...")
 
-            print(f"worker-comfyui - Downloaded {name} ({len(file_bytes)} bytes), uploading to ComfyUI...")
+        # Download the file from the signed URL
+        response = requests.get(url, timeout=120)
+        response.raise_for_status()
+        file_bytes = response.content
 
-            # Parse subfolder and filename from name
-            # e.g., "head/image.png" -> subfolder="head", filename="image.png"
-            if "/" in name:
-                parts = name.rsplit("/", 1)
-                subfolder = parts[0]
-                filename = parts[1]
-            else:
-                subfolder = ""
-                filename = name
+        print(f"worker-comfyui - Downloaded {name} ({len(file_bytes)} bytes), uploading to ComfyUI...")
 
-            # Auto-detect file type from extension
-            name_lower = filename.lower()
-            if name_lower.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
-                # Video file
-                endpoint = f"http://{COMFY_HOST}/upload/video"
-                content_type = "video/mp4"
-                form_field = "video"
-            else:
-                # Image file (default)
-                endpoint = f"http://{COMFY_HOST}/upload/image"
-                content_type = "image/png"
-                form_field = "image"
+        # Parse subfolder and filename from name
+        # e.g., "head/image.png" -> subfolder="head", filename="image.png"
+        if "/" in name:
+            parts = name.rsplit("/", 1)
+            subfolder = parts[0]
+            filename = parts[1]
+        else:
+            subfolder = ""
+            filename = name
 
-            # Prepare the form data with subfolder support
-            files = {
-                form_field: (filename, BytesIO(file_bytes), content_type),
-                "overwrite": (None, "true"),
-            }
-            
-            # Add subfolder if present
-            if subfolder:
-                files["subfolder"] = (None, subfolder)
-                print(f"worker-comfyui - Uploading to subfolder: {subfolder}")
+        # Auto-detect file type from extension
+        name_lower = filename.lower()
+        if name_lower.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+            endpoint = f"http://{COMFY_HOST}/upload/video"
+            content_type = "video/mp4"
+            form_field = "video"
+        else:
+            endpoint = f"http://{COMFY_HOST}/upload/image"
+            content_type = "image/png"
+            form_field = "image"
 
-            # POST request to upload the file
-            upload_response = requests.post(endpoint, files=files, timeout=60)
-            upload_response.raise_for_status()
+        files = {
+            form_field: (filename, BytesIO(file_bytes), content_type),
+            "overwrite": (None, "true"),
+        }
 
-            responses.append(f"Successfully downloaded and uploaded {name}")
-            print(f"worker-comfyui - Successfully uploaded {name} to ComfyUI")
+        if subfolder:
+            files["subfolder"] = (None, subfolder)
+            print(f"worker-comfyui - Uploading to subfolder: {subfolder}")
 
-        except requests.Timeout:
-            error_msg = f"Timeout downloading or uploading {file_item.get('name', 'unknown')}"
-            print(f"worker-comfyui - {error_msg}")
-            download_errors.append(error_msg)
-        except requests.RequestException as e:
-            error_msg = f"Error downloading or uploading {file_item.get('name', 'unknown')}: {e}"
-            print(f"worker-comfyui - {error_msg}")
-            download_errors.append(error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error processing {file_item.get('name', 'unknown')}: {e}"
-            print(f"worker-comfyui - {error_msg}")
-            download_errors.append(error_msg)
+        upload_response = requests.post(endpoint, files=files, timeout=60)
+        upload_response.raise_for_status()
+
+        print(f"worker-comfyui - Successfully uploaded {name} to ComfyUI")
+        return f"Successfully downloaded and uploaded {name}"
+
+    with ThreadPoolExecutor(max_workers=len(download_urls)) as executor:
+        futures = {executor.submit(_download_and_upload_one, item): item for item in download_urls}
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                responses.append(future.result())
+            except requests.Timeout:
+                error_msg = f"Timeout downloading or uploading {item.get('name', 'unknown')}"
+                print(f"worker-comfyui - {error_msg}")
+                download_errors.append(error_msg)
+            except requests.RequestException as e:
+                error_msg = f"Error downloading or uploading {item.get('name', 'unknown')}: {e}"
+                print(f"worker-comfyui - {error_msg}")
+                download_errors.append(error_msg)
+            except Exception as e:
+                error_msg = f"Unexpected error processing {item.get('name', 'unknown')}: {e}"
+                print(f"worker-comfyui - {error_msg}")
+                download_errors.append(error_msg)
 
     if download_errors:
         print(f"worker-comfyui - File download/upload finished with errors")

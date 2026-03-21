@@ -56,6 +56,10 @@ RUN chmod +x /usr/local/bin/comfy-node-install
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
+# Shared start script (used by all platform images)
+COPY scripts/start.sh /start.sh
+RUN chmod +x /start.sh
+
 # Install Requirements (requests, websocket-client, triton, sageattention)
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt

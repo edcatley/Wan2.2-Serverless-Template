@@ -10,7 +10,6 @@ RUN mkdir -p /network-volume
 
 # Copy GKE scripts
 COPY handler.py /handler.py
-COPY start.sh /start.sh
 
 RUN chmod +x /start.sh
 

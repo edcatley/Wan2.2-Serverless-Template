@@ -12,7 +12,6 @@ RUN ln -s /runpod-volume /network-volume
 # Copy RunPod scripts
 COPY handler.py /handler.py
 COPY network_volume.py /network_volume.py
-COPY start.sh /start.sh
 
 RUN chmod +x /start.sh
 

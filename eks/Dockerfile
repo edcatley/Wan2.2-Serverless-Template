@@ -10,7 +10,6 @@ RUN mkdir -p /network-volume
 
 # Copy EKS scripts
 COPY eks/handler.py /handler.py
-COPY eks/start.sh /start.sh
 
 RUN chmod +x /start.sh
 
