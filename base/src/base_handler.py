@@ -890,64 +890,59 @@ def handler(job):
         expected_uploads = set(upload_url_map.keys())
         completed_uploads = set()
 
+        # Collect all output files first
+        output_files = []
         for node_id, node_output in outputs.items():
-            # Look for any potential file outputs from common keys
-            for key in ["videos", "gifs", "images"]: 
+            for key in ["videos", "gifs", "images"]:
                 if key in node_output:
-                    print(
-                        f"worker-comfyui - Node {node_id} contains {len(node_output[key])} file(s) in output key '{key}'"
-                    )
+                    print(f"worker-comfyui - Node {node_id} contains {len(node_output[key])} file(s) in output key '{key}'")
                     for file_info in node_output[key]:
-                        original_filename = file_info.get("filename")
-                        subfolder = file_info.get("subfolder", "")
-                        file_type = file_info.get("type")
+                        filename = file_info.get("filename")
+                        if filename and file_info.get("type") != "temp":
+                            output_files.append((filename, file_info.get("subfolder", ""), file_info.get("type")))
 
-                        if not original_filename or file_type == "temp":
-                            continue
-                        
-                        file_bytes = get_image_data(original_filename, subfolder, file_type)
+        def _fetch_and_upload(file_tuple):
+            original_filename, subfolder, file_type = file_tuple
+            file_bytes = get_image_data(original_filename, subfolder, file_type)
+            if not file_bytes:
+                return {"error": f"Failed to fetch file data for {original_filename} from /view endpoint."}
 
-                        if file_bytes:
-                            # Check if we have a signed URL for this specific file
-                            upload_url = upload_url_map.get(original_filename)
-                            
-                            if upload_url:
-                                # Upload to signed URL
-                                try:
-                                    print(f"worker-comfyui - Uploading {original_filename} to signed URL...")
-                                    
-                                    # Determine content type from filename
-                                    content_type = "application/octet-stream"  # Default
-                                    if original_filename.endswith(('.mp4', '.mov', '.avi')):
-                                        content_type = "video/mp4"
-                                    elif original_filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                                        content_type = "image/png"
-                                    elif original_filename.endswith('.gif'):
-                                        content_type = "image/gif"
-                                    
-                                    headers = {"Content-Type": content_type}
-                                    response = requests.put(upload_url, data=file_bytes, headers=headers, timeout=60)
-                                    response.raise_for_status()
-                                    print(f"worker-comfyui - Successfully uploaded {original_filename} to signed URL")
-                                    output_data.append({"filename": original_filename, "type": "uploaded", "url": upload_url})
-                                    completed_uploads.add(original_filename)
-                                except Exception as e:
-                                    error_msg = f"Error uploading {original_filename} to signed URL: {e}"
-                                    print(f"worker-comfyui - {error_msg}")
-                                    errors.append(error_msg)
-                            
-                            # Base64 Fallback
-                            else:
-                                try:
-                                    base64_file = base64.b64encode(file_bytes).decode("utf-8")
-                                    output_data.append({"filename": original_filename, "type": "base64", "data": base64_file})
-                                except Exception as e:
-                                    error_msg = f"Error encoding {original_filename} to base64: {e}"
-                                    print(f"worker-comfyui - {error_msg}")
-                                    errors.append(error_msg)
+            upload_url = upload_url_map.get(original_filename)
+            if upload_url:
+                content_type = "application/octet-stream"
+                if original_filename.endswith(('.mp4', '.mov', '.avi')):
+                    content_type = "video/mp4"
+                elif original_filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    content_type = "image/png"
+                elif original_filename.endswith('.gif'):
+                    content_type = "image/gif"
+
+                print(f"worker-comfyui - Uploading {original_filename} to signed URL...")
+                resp = requests.put(upload_url, data=file_bytes, headers={"Content-Type": content_type}, timeout=60)
+                resp.raise_for_status()
+                print(f"worker-comfyui - Successfully uploaded {original_filename} to signed URL")
+                return {"filename": original_filename, "type": "uploaded", "url": upload_url}
+            else:
+                base64_file = base64.b64encode(file_bytes).decode("utf-8")
+                return {"filename": original_filename, "type": "base64", "data": base64_file}
+
+        if output_files:
+            with ThreadPoolExecutor(max_workers=len(output_files)) as executor:
+                futures = {executor.submit(_fetch_and_upload, f): f for f in output_files}
+                for future in as_completed(futures):
+                    original_filename = futures[future][0]
+                    try:
+                        result = future.result()
+                        if "error" in result:
+                            errors.append(result["error"])
                         else:
-                            error_msg = f"Failed to fetch file data for {original_filename} from /view endpoint."
-                            errors.append(error_msg)
+                            output_data.append(result)
+                            if result["type"] == "uploaded":
+                                completed_uploads.add(original_filename)
+                    except Exception as e:
+                        error_msg = f"Error processing {original_filename}: {e}"
+                        print(f"worker-comfyui - {error_msg}")
+                        errors.append(error_msg)
 
         # --------------------------------------------------------------------------
         # ----------------- END OF MODIFIED OUTPUT PROCESSING BLOCK ----------------
