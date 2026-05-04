@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # 3. INSTALL SYSTEM DEPS (Generic)
 # FIXED: Added libgl1, libglib2.0-0, etc from the OLD dockerfile so OpenCV works
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
     python3.12 python3.12-venv python3.12-dev \
     git wget build-essential ninja-build ffmpeg \
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
