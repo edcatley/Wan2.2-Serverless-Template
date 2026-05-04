@@ -37,7 +37,8 @@ RUN uv pip install comfy-cli pip setuptools wheel ninja
 # Install PyTorch (This is fine to do manually to force the CUDA version)
 RUN uv pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url ${PYTORCH_INDEX_URL}
 # Install ComfyUI
-RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia
+RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia \
+    && uv pip install --no-cache-dir -r /comfyui/requirements.txt
 
 WORKDIR /comfyui
 
