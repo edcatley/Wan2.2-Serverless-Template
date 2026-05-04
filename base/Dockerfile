@@ -80,8 +80,11 @@ RUN comfy-node-install \
     comfyui-videohelpersuite \
     comfyui-kjnodes \
     comfyui-custom-scripts \
-    comfyui-wan-vace-prep \
-    comfyui-frame-interpolation
+    comfyui-wan-vace-prep
+
+# Install forked frame interpolation node (abandoned upstream, using fork)
+RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
+    && uv pip install --no-cache-dir --no-build-isolation -r /comfyui/custom_nodes/ComfyUI-Frame-Interpolation/requirements-with-cupy.txt
 
 # 7. EXPOSE THE STANDARD PORT
 EXPOSE 8188
