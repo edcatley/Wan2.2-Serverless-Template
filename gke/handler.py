@@ -75,7 +75,7 @@ class LeaseExtender(threading.Thread):
     def run(self):
         print(f"[gke-handler] Lease heartbeat started.")
         while not self.stop_event.is_set():
-            self.stop_event.wait(60)
+            self.stop_event.wait(45)  # extend every 45s with a 15s safety buffer
             if self.stop_event.is_set():
                 break
             try:
@@ -83,7 +83,7 @@ class LeaseExtender(threading.Thread):
                     request={
                         "subscription": subscription_path,
                         "ack_ids": [self.wrapper.ack_id],
-                        "ack_deadline_seconds": 600,
+                        "ack_deadline_seconds": 60,
                     }
                 )
             except Exception as e:

@@ -26,4 +26,4 @@ python -u /comfyui/main.py \
     --use-sage-attention &
 
 echo "worker-comfyui - Starting handler..."
-python -u /handler.py
+exec python -u /handler.py
