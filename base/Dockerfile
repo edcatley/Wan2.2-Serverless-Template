@@ -25,23 +25,21 @@ RUN apt-get update && apt-get install -y \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 4. INSTALL UV AND COMFY-CLI (into system Python, not a venv)
+# 4. INSTALL PYTHON ENV
 RUN wget -qO- https://astral.sh/uv/install.sh | sh \
-    && ln -s /root/.local/bin/uv /usr/local/bin/uv
-RUN uv pip install --system comfy-cli pip setuptools wheel ninja
+    && ln -s /root/.local/bin/uv /usr/local/bin/uv \
+    && uv venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}" \
+    VIRTUAL_ENV="/opt/venv"
 
-# 5. INSTALL COMFYUI
-# comfy-cli will create and own /comfyui/.venv - we let it do its thing
-RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia
+# 5. INSTALL COMFY & PYTORCH
+RUN uv pip install comfy-cli pip setuptools wheel ninja
 
-# From here on, all pip installs go into /comfyui/.venv
-ENV PATH="/comfyui/.venv/bin:${PATH}"
-
-# 6. INSTALL PYTORCH into comfyui's venv
+# Install PyTorch (This is fine to do manually to force the CUDA version)
 RUN uv pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url ${PYTORCH_INDEX_URL}
-
-# 7. INSTALL COMFYUI'S OWN REQUIREMENTS into comfyui's venv
-RUN uv pip install --no-cache-dir -r /comfyui/requirements.txt
+# Install ComfyUI
+RUN /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia \
+    && uv pip install --no-cache-dir -r /comfyui/requirements.txt
 
 WORKDIR /comfyui
 
@@ -50,7 +48,7 @@ COPY src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# 8. SCRIPTS & CUSTOM NODES
+# 6. SCRIPTS & CUSTOM NODES
 # Add script to install custom nodes
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
 RUN chmod +x /usr/local/bin/comfy-node-install
@@ -77,7 +75,6 @@ COPY src/ /src/
 COPY test-data/ /comfyui/input/demo/
 
 # CUSTOM NODE INSTALL
-# comfy-cli installs node deps into /comfyui/.venv (which is now our PATH venv)
 ENV PIP_NO_INPUT=1
 RUN comfy-node-install \
     comfyui-videohelpersuite \
@@ -89,8 +86,8 @@ RUN comfy-node-install \
 RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
     && uv pip install --no-cache-dir --no-build-isolation -r /comfyui/custom_nodes/ComfyUI-Frame-Interpolation/requirements-with-cupy.txt
 
-# 9. EXPOSE THE STANDARD PORT
+# 7. EXPOSE THE STANDARD PORT
 EXPOSE 8188
 
-# 10. DEFAULT CMD (Just runs Comfy normally)
+# 8. DEFAULT CMD (Just runs Comfy normally)
 CMD ["python", "main.py", "--disable-metadata", "--listen", "0.0.0.0"]
