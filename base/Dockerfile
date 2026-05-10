@@ -80,7 +80,8 @@ RUN comfy-node-install \
     comfyui-videohelpersuite \
     comfyui-kjnodes \
     comfyui-custom-scripts \
-    comfyui-wan-vace-prep
+    comfyui-wan-vace-prep \
+    tripleksampler
 
 # Install forked frame interpolation node (abandoned upstream, using fork)
 RUN git clone https://github.com/edcatley/ComfyUI-Frame-Interpolation /comfyui/custom_nodes/ComfyUI-Frame-Interpolation \
