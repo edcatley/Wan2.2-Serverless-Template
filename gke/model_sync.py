@@ -14,14 +14,19 @@ leading "models/" prefix stripped since the mount point IS the models dir.
 e.g. gs://bucket/models/unet/wan2.2.safetensors
      → /comfyui/models/unet/wan2.2.safetensors
 
+Downloads use transfer_manager for parallel chunked transfers to maximise
+NVMe write throughput on large model files.
+
 Sentinel files (<model_filename>.done) are written only after a successful
 download, so a container crash mid-download leaves no sentinel and the file
 will be re-downloaded on the next job.
 """
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.cloud import storage
+from google.cloud.storage import transfer_manager
 
 # ---------------------------------------------------------------------------
 # Config — override via environment variables if needed
@@ -72,6 +77,7 @@ def _build_bucket_index() -> None:
     """
     global _bucket_index
     print(f"[model-sync] Building bucket index for gs://{GCS_BUCKET}...")
+    t0 = time.time()
     client = storage.Client()
     blobs = client.list_blobs(GCS_BUCKET)
     index = {}
@@ -80,7 +86,8 @@ def _build_bucket_index() -> None:
         if filename:  # skip directory placeholder blobs
             index[filename] = blob.name
     _bucket_index = index
-    print(f"[model-sync] Bucket index built — {len(_bucket_index)} object(s) found")
+    elapsed = time.time() - t0
+    print(f"[model-sync] Bucket index built — {len(_bucket_index)} object(s) in {elapsed:.2f}s")
 
 
 # Build the index when the module is first imported
@@ -111,8 +118,7 @@ def extract_required_models(workflow: dict) -> list[tuple[str, str]]:
         if class_type not in LOADER_MAP:
             continue
 
-        filenames = []
-        filenames.append(inputs.get(LOADER_MAP[class_type]))
+        filenames = [inputs.get(LOADER_MAP[class_type])]
         if class_type == "DualCLIPLoader":
             filenames.append(inputs.get(_DUAL_CLIP_EXTRA))
 
@@ -146,7 +152,8 @@ def _ensure_one(client: storage.Client, blob_name: str, local_path: str) -> tupl
     """
     Ensure a single model file is on disk.
     Checks for a sentinel file — if present, the model is good.
-    If absent, downloads the model and writes the sentinel on success.
+    If absent, downloads the model using transfer_manager (parallel chunked)
+    and writes the sentinel on success.
     Returns (success, error_message).
     """
     sentinel = _sentinel_path(local_path)
@@ -156,21 +163,37 @@ def _ensure_one(client: storage.Client, blob_name: str, local_path: str) -> tupl
         return True, ""
 
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    print(f"[model-sync] Downloading gs://{GCS_BUCKET}/{blob_name}...")
+
+    # Get file size for speed reporting
+    bucket = client.bucket(GCS_BUCKET)
+    blob = bucket.blob(blob_name)
+    blob.reload()
+    size_bytes = blob.size or 0
+    size_mb = size_bytes / (1024 * 1024)
+
+    print(f"[model-sync] Downloading gs://{GCS_BUCKET}/{blob_name} ({size_mb:.1f} MB)...")
+    t0 = time.time()
 
     try:
-        bucket = client.bucket(GCS_BUCKET)
-        blob = bucket.blob(blob_name)
-        blob.download_to_filename(local_path)
+        transfer_manager.download_chunks_concurrently(
+            blob,
+            local_path,
+        )
+
+        elapsed = time.time() - t0
+        speed_mbps = size_mb / elapsed if elapsed > 0 else 0
+        print(f"[model-sync] Downloaded OK: {local_path} "
+              f"({size_mb:.1f} MB in {elapsed:.1f}s — {speed_mbps:.1f} MB/s)")
 
         # Write sentinel only after a confirmed successful download
         with open(sentinel, "w") as f:
             f.write("ok")
 
-        print(f"[model-sync] Downloaded OK: {local_path}")
         return True, ""
 
     except Exception as e:
+        elapsed = time.time() - t0
+        print(f"[model-sync] ERROR after {elapsed:.1f}s downloading {blob_name}: {e}")
         # Clean up any partial file so the next attempt starts fresh
         if os.path.isfile(local_path):
             try:
@@ -182,7 +205,8 @@ def _ensure_one(client: storage.Client, blob_name: str, local_path: str) -> tupl
 
 def ensure_models_on_disk(required_models: list[tuple[str, str]]) -> list[str]:
     """
-    Ensure all required models are on disk. Downloads run in parallel.
+    Ensure all required models are on disk. Files are downloaded in parallel
+    (one thread per file, each using transfer_manager for chunked I/O).
     Returns a list of error strings — empty means all good.
     """
     if not required_models:
@@ -193,6 +217,7 @@ def ensure_models_on_disk(required_models: list[tuple[str, str]]) -> list[str]:
     client = storage.Client()
     errors = []
 
+    t0 = time.time()
     print(f"[model-sync] Checking/fetching {len(required_models)} model(s)...")
 
     with ThreadPoolExecutor(max_workers=len(required_models)) as executor:
@@ -206,9 +231,10 @@ def ensure_models_on_disk(required_models: list[tuple[str, str]]) -> list[str]:
             if not success:
                 errors.append(f"{local_path}: {err}")
 
+    elapsed = time.time() - t0
     if errors:
-        print(f"[model-sync] Finished with {len(errors)} error(s)")
+        print(f"[model-sync] Finished with {len(errors)} error(s) in {elapsed:.1f}s")
     else:
-        print(f"[model-sync] All models confirmed on disk")
+        print(f"[model-sync] All models confirmed on disk in {elapsed:.1f}s")
 
     return errors
