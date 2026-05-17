@@ -124,7 +124,7 @@ def _handle_sigterm(signum, frame):
         print(f"[gke-handler] Nacking current job to ensure redelivery.")
         _current_wrapped_message.nack()
         if _current_job_id and _current_webhook_url:
-            _post_status(_current_webhook_url, _current_job_id, "QUEUED")
+            _post_status(_current_webhook_url, _current_job_id, "IN_QUEUE")
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, _handle_sigterm)
