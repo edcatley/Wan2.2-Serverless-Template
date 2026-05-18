@@ -158,17 +158,17 @@ def _process_job(wrapped_message):
         heartbeat.start()
 
         try:
-            # Ensure all models required by this workflow are on disk
-            # before handing off to ComfyUI.
-            workflow = job_input.get("workflow", {})
-            required_models = extract_required_models(workflow)
-            sync_errors = ensure_models_on_disk(required_models)
-            if sync_errors:
-                error_msg = f"Failed to fetch required model(s): {sync_errors}"
-                print(f"[gke-handler] ERROR: {error_msg}")
-                _post_status(webhook_url, job_id, "FAILED", {"error": error_msg})
-                wrapped_message.ack()
-                return
+            # Model pre-fetch disabled while testing FUSE-mounted bucket.
+            # Uncomment to re-enable NVMe pre-download path.
+            # workflow = job_input.get("workflow", {})
+            # required_models = extract_required_models(workflow)
+            # sync_errors = ensure_models_on_disk(required_models)
+            # if sync_errors:
+            #     error_msg = f"Failed to fetch required model(s): {sync_errors}"
+            #     print(f"[gke-handler] ERROR: {error_msg}")
+            #     _post_status(webhook_url, job_id, "FAILED", {"error": error_msg})
+            #     wrapped_message.ack()
+            #     return
 
             # Call the ComfyUI handler
             result = handler({"id": job_id, "input": job_input})
