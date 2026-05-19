@@ -52,6 +52,24 @@ steps:
       - '--all-tags'
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui'
 
+  # ==========================================================
+  # 3. COPY GKE IMAGE TO US REGION
+  # ==========================================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: retag-gke-us
+    waitFor: ['push-gke']
+    args:
+      - tag
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-latest'
+      - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-latest'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-gke-us
+    waitFor: ['retag-gke-us']
+    args:
+      - push
+      - 'us-central1-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/wan2-comfyui:gke-latest'
+
 substitutions:
   _PROJECT_ID: animaitus
   _REGION: europe-west4
